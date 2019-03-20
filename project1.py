@@ -36,7 +36,6 @@ in this project.
 #############################################################################'''
 class Event:
     timestamp = -1
-    ready_queue = []
     def __str__(self):
         return "An Event"
 '''
@@ -68,14 +67,15 @@ class SimulationEvent(Event):
         return s
 class StartSimulation(SimulationEvent): action = "started"
 class EndSimulation(SimulationEvent):   action = "ended"
+
 class ProcessEvent(Event):
     process = None
     simulation = None
-    def timestamp(self): 
-        return "time " + str(self.simulation.current_time) + "ms"
+    def timestamp_str(self): 
+        return "time " + str(self.timestamp) + "ms"
     def queue(self): 
         q = self.simulation.ready
-        s = "[ Q "
+        s = "[Q "
         if (len(q) > 0):
                 s += " ".join(str(p) for p in q)
         else:   s += "<empty>"
@@ -87,28 +87,40 @@ class ProcessEvent(Event):
 class NewProcess(ProcessEvent):
     def __str__(self): return " ".join([self.process.name, "[NEW] (arrival time", str(self.process.creation_ts), "ms)", str(self.process.bursts_remaining), "CPU bursts"])
 class ProcessArrival(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp() + ":", str(self.process), "(tau 1000ms) arrived; added to ready queue", self.queue()])
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), \
+        "(tau", str(self.process.tau) + ")", \
+            "arrived; added to ready queue", self.queue()])
 class CPUBurstBegun(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp() + ":", str(self.process), "started using the CPU for 505ms burst", self.queue()])
+    burst_time = -1
+    def __init__(self, simulation, process, burst_time):
+        self.simulation = simulation
+        self.process = process
+        self.burst_time = burst_time
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "started using the CPU for", str(self.burst_time) + "ms", "burst", self.queue()])
 class CPUBurstEnded(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp() + ": ", str(self.process), "completed a CPU burst; 88 bursts to go", self.queue()])
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "completed a CPU burst;", str(self.process.bursts_remaining), "bursts to go", self.queue()])
 class ProcessTauRecalculated(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp() + ":", "Recalculated tau = 753ms for process", self.process.name, self.queue()])
+    def __str__(self): return " ".join([self.timestamp_str() + ":", "Recalculated tau =", str(self.process.tau), "for process", self.process.name, self.queue()])
 class Preemption(ProcessEvent):
     new_process = None
     def __init__(self, simulation, old_process, new_process):
         self.simulation = simulation
         self.process = old_process
         self.new_process = new_process
-    def __str__(self): return " ".join([self.timestamp() + ":", str(self.new_process),\
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),\
                               "(tau", str(self.new_process.tau) + "ms) completed I/O and will preempt",\
                               self.process.name, self.queue()])
 class IOBurstStarts(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp() + ": ", str(self.process), "switching out of CPU; will block on I/O until time 105805ms", self.queue()])
+    io_burst_time = -1
+    def __init__(self, simulation, process, io_burst_time):
+        self.simulation = simulation
+        self.process = process
+        self.io_burst_time = io_burst_time
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "switching out of CPU; will block on I/O until time", str(self.simulation.current_time + self.process.burst_times[0]) + "ms", self.queue()])
 class IOBurstEnds(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp() + ":", str(self.process), "(tau 1104ms) completed I/O; added to ready queue", self.queue()])
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "(tau", str(self.process.tau) + "ms)", "completed I/O; added to ready queue", self.queue()])
 class ProcessCompleted(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp() + ":", str(self.process), "terminated", self.queue()])
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "terminated", self.queue()])
 
 class Process:
     class State(Enum):
@@ -116,36 +128,115 @@ class Process:
         READY = 1
         BLOCKED = 2
         COMPLETED = -1
-        
     name = None
     creation_ts = -1
     last_active_ts = -1
     last_blocked_ts = -1
     bursts_remaining = -1
-    cpu_burst_time = -1
-    io_burst_time = -1
+    burst_times = []
+    io_burst_times = []
     tau = -1
     state = State.READY
 
     def __init__(self, name, timestamp, 
-                 num_bursts, cpu_burst_time, io_burst_time, tau = 0):
+                 num_bursts, cpu_burst_times, io_burst_times, tau = 0):
         self.name = name
         self.tau = tau
         self.creation_ts = timestamp
         self.bursts_remaining = num_bursts
         self.state = Process.State.READY
-        self.cpu_burst_time = cpu_burst_time
-
-        self.io_burst_time = io_burst_time
+        self.burst_times = cpu_burst_times
+        self.io_burst_times = io_burst_times
 
     def time_remaining(self):
-        return self.bursts_remaining*(self.cpu_burst_time + self.io_burst_time)
+        return sum(self.burst_times) + sum(self.io_burst_times)
 
     def is_completed(self):
         return self.bursts_remaining > 0
 
     def __str__(self): return "Process " + self.name
+class ProcessFactory:
+    def generate(self):
+        return []
+class RandomProcessFactory(ProcessFactory):
+    ics = None
+    def __init__(self, argv):
+        self.ics = RandomProcessFactory.InitialConditions(argv)
+    
+    # Uncomment the next line if using Python 2.x...
+    # from __future__ import division
+    class Rand48(object):
+        def __init__(self, seed):
+            self.n = seed
+        def seed(self, seed):
+            self.n = seed
+        def srand(self, seed):
+            self.n = (seed << 16) + 0x330e
+        def next(self):
+            self.n = (25214903917 * self.n + 11) & (2**48 - 1)
+            return self.n
+        def drand(self):
+            return self.next() / 2**48
+        def lrand(self):
+            return self.next() >> 17
+        def mrand(self):
+            n = self.next() >> 16
+            if n & (1 << 31):
+                n -= 1 << 32
+            return n   
+        
+    def generate(self):
+        # Pseudo-random numbers and predictability
+        r = RandomProcessFactory.Rand48(0)
+        r.srand(self.ics.seed)
+        processes = []
+        letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        for i in range(self.ics.num_processes):
+            arrival_time = -1
+            # 1. Keep generating arrival times until a valid arrival time is generated
+            while (arrival_time < 0 or arrival_time > self.ics.random_number_cieling):
+                arrival_time = math.floor(self.ics.map_to_exp(r.drand()))
+            # 2. num_bursts in [1, 100]
+            num_bursts = math.trunc(r.drand()*100.0)+1            
+            burst_times = []
+            io_burst_times = []
+            # Generate burst times for each burst
+            for j in range(num_bursts): 
+                burst_time = -1
+                while (burst_time < 0 or burst_time > self.ics.random_number_cieling):
+                    burst_time = math.ceil(self.ics.map_to_exp(r.drand()))
+                burst_times.append(burst_time)
+                io_burst_time = -1
+                # The last burst doesn't use IO
+                if (j < num_bursts - 1):
+                    while (io_burst_time < 0 or io_burst_time > self.ics.random_number_cieling):
+                        io_burst_time = math.ceil(self.ics.map_to_exp(r.drand()))
+                    io_burst_times.append(io_burst_time)
+            process = Process(letters[i], arrival_time, num_bursts, burst_times, io_burst_times)
+            processes.append(process)
+        return processes
 
+    class InitialConditions:
+        seed = -1
+        lambda_value = -1
+        random_number_cieling = -1
+        num_processes = -1
+        context_switch_duration = -1
+        alpha = -1
+        time_slice = -1
+        rr_should_push_front = False
+        def map_to_exp(self, uniform_value):
+            return (-1)*math.log(float(uniform_value))/self.lambda_value
+
+        def __init__(self, argv):
+            self.seed = int(argv[1])
+            self.lambda_value = float(argv[2])
+            self.random_number_cieling = float(argv[3])
+            self.num_processes = int(argv[4])
+            self.context_switch_duration = float(argv[5])
+            self.alpha = float(argv[6])
+            self.time_slice = float(argv[7])
+            self.rr_should_push_front = True if len(argv) == 9 and argv[8] == 'BEGINNING' else False
 
 class Scheduler:
     name = "None"
@@ -189,23 +280,20 @@ class Scheduler:
         n = len(self.completed) + len(self.queue) + len(self.ready)
         return '\n'.join(\
             ['Algorithm {0}'.format(self.name),   \
-             '-- average CPU burst time: {0} ms'.format(self.cpu_burst_time/n), \
-             '-- average wait time: {0} ms'.format(self.tot_wait_time/n), \
-             '-- average turnaround time: {0} ms'.format(self.tot_turnaround_time/n), \
-             '-- total number of context switches: {0}'.format(len(list(filter(lambda cs: cs is Preemption, self.events)))), \
-             '-- total number of preemptions: {0}\n'.format(len(list(filter(lambda cs: cs is Preemption, self.events))))])
+             '-- average CPU burst time: {0:0.3f} ms'.format(self.cpu_burst_time/n), \
+             '-- average wait time: {0:0.3f} ms'.format(self.tot_wait_time/n), \
+             '-- average turnaround time: {0:0.3f} ms'.format(self.tot_turnaround_time/n), \
+             '-- total number of context switches: {0:0.3f}'.format(len(list(filter(lambda cs: cs is Preemption, self.events)))), \
+             '-- total number of preemptions: {0:0.3f}\n'.format(len(list(filter(lambda cs: cs is Preemption, self.events))))])
  
     def is_completed(self): return len(self.queue) == 0
-    def logs(self):
-        return '\n'.join(str(e) for e in self.events) + '\n'
+    def logs(self):         return '\n'.join(str(e) for e in self.events) + '\n'
     '''
         Log an event, such as a preemption, process completion, or context switch
-
         e.g. self.log_event(ProcessCompleted(p1))
     '''
     def log_event(self, event):
         event.timestamp = self.current_time
-        event.queue = deepcopy(self.ready)
         self.events.append(event)
     
     def begin(self):
@@ -213,18 +301,28 @@ class Scheduler:
     def end(self):
         self.log_event(EndSimulation(self))
     def process_arrived(self, process):
+        # TODO: Configure process arrival
         self.log_event(ProcessArrival(self, process))
     def process_burst(self, process):
-        self.log_event(CPUBurstBegun(self, process))
+        # TODO: Configure process CPU burst begins
+        self.log_event(CPUBurstBegun(self, process, process.burst_times[-1]))
     def process_ends_burst(self, process):
+        # TODO: Configure process CPU burst ends
         self.log_event(CPUBurstEnded(self, process))
     def recaculated_tau(self, process):
+        # TODO: Configure process recalculates Tau 
+        # Actually recalculate and assign Tau
         self.log_event(ProcessTauRecalculated(self, process))
     def process_io_burst(self, process):
-        self.log_event(IOBurstStarts(self, process))
+        # TODO: Configure process IO bursts begin
+        self.log_event(IOBurstStarts(self, process, process.io_burst_times[-1]))
     def process_ends_io_burst(self, process):
+        # TODO: Configure process IO bursts end
         self.log_event(IOBurstEnds(self, process))
-    
+    def process_terminated(self, process):
+        # TODO: Configure process termination
+        self.log_event(ProcessCompleted(self, process))
+
 ''' Shorted Job First Process Scheduler '''
 class SJFScheduler(Scheduler):
     name = "SJF"
@@ -233,6 +331,17 @@ class SJFScheduler(Scheduler):
         # TODO: Implement
         self.begin()
 
+        # self.process_arrived(self.queue[0])
+
+        # self.process_burst(self.queue[0])
+        # self.process_ends_burst(self.queue[0])
+
+        # self.process_io_burst(self.queue[0])
+        # self.process_ends_io_burst(self.queue[0])
+
+        # self.recaculated_tau(self.queue[0])
+
+        # self.process_terminated(self.queue[0])
 
         self.end()
 
@@ -245,6 +354,17 @@ class SRTScheduler(Scheduler):
         # TODO: Implement
         self.begin()
 
+        # self.process_arrived(self.queue[0])
+
+        # self.process_burst(self.queue[0])
+        # self.process_ends_burst(self.queue[0])
+
+        # self.process_io_burst(self.queue[0])
+        # self.process_ends_io_burst(self.queue[0])
+
+        # self.recaculated_tau(self.queue[0])
+
+        # self.process_terminated(self.queue[0])
 
         self.end()
 
@@ -257,6 +377,17 @@ class FCFSScheduler(Scheduler):
         # TODO: Implement
         self.begin()
 
+        # self.process_arrived(self.queue[0])
+
+        # self.process_burst(self.queue[0])
+        # self.process_ends_burst(self.queue[0])
+
+        # self.process_io_burst(self.queue[0])
+        # self.process_ends_io_burst(self.queue[0])
+
+        # self.recaculated_tau(self.queue[0])
+
+        # self.process_terminated(self.queue[0])
 
         self.end()
 
@@ -266,107 +397,48 @@ class RRScheduler(Scheduler):
     def execute(self):
         # SJF Algorithm
         # TODO: Implement
-        self.begin()
 
+        ''' 
+        Example of Scheduler use
+        Subclass for custom behavior 
+        '''
+        self.begin()
+        
+        # self.process_arrived(self.queue[0])
+
+        # self.process_burst(self.queue[0])
+        # self.process_ends_burst(self.queue[0])
+
+        # self.process_io_burst(self.queue[0])
+        # self.process_ends_io_burst(self.queue[0])
+
+        # self.recaculated_tau(self.queue[0])
+
+        # self.process_terminated(self.queue[0])
 
         self.end()
-
-class ProcessFactory:
-    def generate(self):
-        return []
-
-class RandomProcessFactory(ProcessFactory):
-    ics = None
-    def __init__(self, argv):
-        self.ics = RandomProcessFactory.InitialConditions(argv)
-    
-    # Uncomment the next line if using Python 2.x...
-    # from __future__ import division
-    class Rand48(object):
-        def __init__(self, seed):
-            self.n = seed
-        def seed(self, seed):
-            self.n = seed
-        def srand(self, seed):
-            self.n = (seed << 16) + 0x330e
-        def next(self):
-            self.n = (25214903917 * self.n + 11) & (2**48 - 1)
-            return self.n
-        def drand(self):
-            return self.next() / 2**48
-        def lrand(self):
-            return self.next() >> 17
-        def mrand(self):
-            n = self.next() >> 16
-            if n & (1 << 31):
-                n -= 1 << 32
-            return n   
-        
-    def generate(self):
-        r = RandomProcessFactory.Rand48(0)
-        r.srand(self.ics.seed)
-        processes = []
-        letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-        for i in range(self.ics.num_processes):
-            arrival_time = -1
-            # Keep generating arrival times until a valid arrival time is generated
-            while (arrival_time < 0 or arrival_time > self.ics.arrival_time_cieling):
-                arrival_time = math.floor(self.ics.map_to_exp(r.drand()))
-            # num_bursts in [1, 100]
-            num_bursts = math.trunc(r.drand()*100.0)+1            
-            burst_times = []
-            io_burst_times = []
-            # Generate burst times for each burst
-            for j in range(num_bursts): 
-                burst_times.append(r.drand())
-                # The last burst doesn't use IO
-                if (j < num_bursts - 1):
-                    io_burst_times.append(r.drand())
-            process = Process(letters[i], arrival_time, num_bursts, burst_times, io_burst_times)
-            processes.append(process)
-        return processes
-
-    class InitialConditions:
-        seed = -1
-        lambda_value = -1
-        arrival_time_cieling = -1
-        num_processes = -1
-        context_switch_duration = -1
-        alpha = -1
-        time_slice = -1
-        rr_should_push_front = False
-        def map_to_exp(self, uniform_value):
-            return (-1)*math.log(float(uniform_value))/self.lambda_value
-
-        def __init__(self, argv):
-            self.seed = int(argv[1])
-            self.lambda_value = float(argv[2])
-            self.arrival_time_cieling = float(argv[3])
-            self.num_processes = int(argv[4])
-            self.context_switch_duration = float(argv[5])
-            self.alpha = float(argv[6])
-            self.time_slice = float(argv[7])
-            self.rr_should_push_front = True if len(argv) == 9 and argv[8] == 'BEGINNING' else False
 
 
 '''#############################################################################
 #                                     MAIN                                     #
 #############################################################################'''
 if __name__ == '__main__':
-    argv = sys.argv
     
     # Generate processes
-    processes = RandomProcessFactory(argv).generate()
+    processes = RandomProcessFactory(sys.argv).generate()
+    
     # Queue processes
-    sjf = SJFScheduler(deepcopy(processes))
-    srt = SRTScheduler(deepcopy(processes))
-    fcfs = FCFSScheduler(deepcopy(processes))
-    rr = RRScheduler(deepcopy(processes))
-    # Execute processes
+    sjf = SJFScheduler(deepcopy(processes))   # Shortest Job First
+    srt = SRTScheduler(deepcopy(processes))   # Shortest Time Remaining 
+    fcfs = FCFSScheduler(deepcopy(processes)) # First Come First Serve
+    rr = RRScheduler(deepcopy(processes))     # Round Robin
+    
+    # Execute (create) Schedules
     sjf.execute()
     srt.execute()
     fcfs.execute()
     rr.execute()
+
     # Output process logs
     print(sjf.logs())
     print(srt.logs())
@@ -381,3 +453,4 @@ if __name__ == '__main__':
     o.write(str(rr))
     o.close()
 
+    # Done
