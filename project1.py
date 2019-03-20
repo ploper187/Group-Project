@@ -99,7 +99,7 @@ class CPUBurstBegun(ProcessEvent):
 class CPUBurstEnded(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "completed a CPU burst;", str(self.process.bursts_remaining), "bursts to go", self.queue()])
 class ProcessTauRecalculated(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp_str() + ":", "Recalculated tau =", str(self.process.tau), "for process", self.process.name, self.queue()])
+    def __str__(self): return " ".join([self.timestamp_str() + ":", "Recalculated tau =", str(self.process.tau) + "ms", "for process", self.process.name, self.queue()])
 class Preemption(ProcessEvent):
     new_process = None
     def __init__(self, simulation, old_process, new_process):
@@ -159,8 +159,7 @@ class Process:
 
     def __str__(self): return "Process " + self.name
 class ProcessFactory:
-    def generate(self):
-        return []
+    def generate(self): return []
 class RandomProcessFactory(ProcessFactory):
     ics = None
     def __init__(self, argv):
@@ -169,19 +168,14 @@ class RandomProcessFactory(ProcessFactory):
     # Uncomment the next line if using Python 2.x...
     # from __future__ import division
     class Rand48(object):
-        def __init__(self, seed):
-            self.n = seed
-        def seed(self, seed):
-            self.n = seed
-        def srand(self, seed):
-            self.n = (seed << 16) + 0x330e
+        def __init__(self, seed): self.n = seed
+        def seed(self, seed):     self.n = seed
+        def srand(self, seed):    self.n = (seed << 16) + 0x330e
         def next(self):
             self.n = (25214903917 * self.n + 11) & (2**48 - 1)
             return self.n
-        def drand(self):
-            return self.next() / 2**48
-        def lrand(self):
-            return self.next() >> 17
+        def drand(self):          return self.next() / 2**48
+        def lrand(self):          return self.next() >> 17
         def mrand(self):
             n = self.next() >> 16
             if n & (1 << 31):
