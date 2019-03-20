@@ -84,7 +84,7 @@ class ProcessEvent(Event):
         self.process = (process)
         self.simulation = (simulation)
 class NewProcess(ProcessEvent):
-    def __str__(self): return " ".join([self.process.name, "[NEW] (arrival time", str(self.process.creation_ts), "ms)", str(self.process.bursts_remaining), "CPU bursts"])
+    def __str__(self): return " ".join([str(self.process), "[NEW] (arrival time", str(self.process.creation_ts), "ms)", str(self.process.bursts_remaining), "CPU bursts"])
 class ProcessArrival(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), \
         "(tau", str(self.process.tau) + ")", \
