@@ -61,7 +61,7 @@ class SimulationEvent(Event):
         s += "Simulator " + self.action + " for " +  self.simulation.name
         s += " [Q "
         if (len(self.simulation.ready) > 0):
-                s += " ".join(str(p) for p in self.simulation.ready)
+                s += " ".join(p.name for p in self.simulation.ready)
         else:   s += "<empty>"
         s += "]"
         return s
@@ -71,13 +71,12 @@ class EndSimulation(SimulationEvent):   action = "ended"
 class ProcessEvent(Event):
     process = None
     simulation = None
-    def timestamp_str(self): 
-        return "time " + str(self.timestamp) + "ms"
+    def timestamp_str(self): return "time " + str(self.timestamp) + "ms"
     def queue(self): 
         q = self.simulation.ready
         s = "[Q "
         if (len(q) > 0):
-                s += " ".join(str(p) for p in q)
+                s += " ".join(p.name for p in q)
         else:   s += "<empty>"
         s += "]"
         return s
