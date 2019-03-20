@@ -303,6 +303,8 @@ class Scheduler:
     '''
     def log_event(self, event):
         event.timestamp = self.current_time
+        if (event is ProcessEvent):
+            event.process = deepcopy(event.process)
         self.events.append(event)
     
     def begin(self):
