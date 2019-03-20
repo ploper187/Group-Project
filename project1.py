@@ -1,14 +1,9 @@
 __author__ = "Cameron Scott, Adam Kuniholm, and Sam Fite"
-__copyright__ = "Copyright 2019, Cameron Scott, Adam Kuniholm, and Sam Fite"
+__right__ = "right 2019, Cameron Scott, Adam Kuniholm, and Sam Fite"
 __credits__ = ["Cameron Scott", "Adam Kuniholm", "Sam Fite"]
 __license__ = "MIT"
 
 
-from enum import Enum
-from copy import deepcopy
-import math
-import random
-import sys
 '''
 CS 4210 Operating Systems
 Group Project 1 - CPU Scheduling Simulation
@@ -31,6 +26,11 @@ in this project.
 '''#############################################################################
 #                                   IMPORTS                                    #
 #############################################################################'''
+from enum import Enum
+from copy import copy
+import math
+import random
+import sys
 '''#############################################################################
 #                              CLASS DECLARATIONS                              #
 #############################################################################'''
@@ -55,7 +55,7 @@ time <t>ms: <event-details> [Q <queue-contents>]
 class SimulationEvent(Event):
     simulation = None
     action = ""
-    def __init__(self, simulation): self.simulation = simulation
+    def __init__(self, simulation): self.simulation = (simulation)
     def __str__(self): 
         s = "time " + str(self.simulation.current_time) + "ms: "
         s += "Simulator " + self.action + " for " +  self.simulation.name
@@ -82,8 +82,8 @@ class ProcessEvent(Event):
         s += "]"
         return s
     def __init__(self, simulation, process):
-        self.process = process
-        self.simulation = simulation
+        self.process = (process)
+        self.simulation = (simulation)
 class NewProcess(ProcessEvent):
     def __str__(self): return " ".join([self.process.name, "[NEW] (arrival time", str(self.process.creation_ts), "ms)", str(self.process.bursts_remaining), "CPU bursts"])
 class ProcessArrival(ProcessEvent):
@@ -93,8 +93,8 @@ class ProcessArrival(ProcessEvent):
 class CPUBurstBegun(ProcessEvent):
     burst_time = -1
     def __init__(self, simulation, process, burst_time):
-        self.simulation = simulation
-        self.process = process
+        self.simulation = (simulation)
+        self.process = (process)
         self.burst_time = burst_time
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "started using the CPU for", str(self.burst_time) + "ms", "burst", self.queue()])
 class CPUBurstEnded(ProcessEvent):
@@ -104,17 +104,17 @@ class ProcessTauRecalculated(ProcessEvent):
 class Preemption(ProcessEvent):
     new_process = None
     def __init__(self, simulation, old_process, new_process):
-        self.simulation = simulation
-        self.process = old_process
-        self.new_process = new_process
+        self.simulation = (simulation)
+        self.process = (old_process)
+        self.new_process = (new_process)
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),\
                               "(tau", str(self.new_process.tau) + "ms) completed I/O and will preempt",\
                               self.process.name, self.queue()])
 class IOBurstStarts(ProcessEvent):
     io_burst_time = -1
     def __init__(self, simulation, process, io_burst_time):
-        self.simulation = simulation
-        self.process = process
+        self.simulation = (simulation)
+        self.process = (process)
         self.io_burst_time = io_burst_time
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "switching out of CPU; will block on I/O until time", str(self.simulation.current_time + self.io_burst_time) + "ms", self.queue()])
 class IOBurstEnds(ProcessEvent):
@@ -296,17 +296,14 @@ class Scheduler:
              '-- total number of preemptions: {0:0.3f}\n'.format(len(list(filter(lambda cs: cs is Preemption, self.events))))])
  
     def is_completed(self): return len(self.completed) == self.num_processes
-    def logs(self):         return '\n'.join(str(e) for e in self.events) + '\n'
+    def logs(self):         return '\n'.join(self.events) + '\n'
     '''
         Log an event, such as a preemption, process completion, or context switch
         e.g. self.log_event(ProcessCompleted(p1))
     '''
     def log_event(self, event):
         event.timestamp = self.current_time
-        if (event is ProcessEvent):
-            event.process = deepcopy(event.process)
-        self.events.append(event)
-    
+        self.events.append(str(event))
     def begin(self):
         self.log_event(StartSimulation(self))
     def end(self):
@@ -503,10 +500,10 @@ if __name__ == '__main__':
     processes = RandomProcessFactory(sys.argv).generate()
     
     # Queue processes
-    sjf = SJFScheduler(deepcopy(processes))   # Shortest Job First
-    srt = SRTScheduler(deepcopy(processes))   # Shortest Time Remaining 
-    fcfs = FCFSScheduler(deepcopy(processes)) # First Come First Serve
-    rr = RRScheduler(deepcopy(processes))     # Round Robin
+    sjf = SJFScheduler(copy(processes))   # Shortest Job First
+    srt = SRTScheduler(copy(processes))   # Shortest Time Remaining 
+    fcfs = FCFSScheduler(copy(processes)) # First Come First Serve
+    rr = RRScheduler(copy(processes))     # Round Robin
     
     # Execute (create) Schedules
     sjf.execute()
