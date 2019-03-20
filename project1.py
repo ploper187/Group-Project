@@ -281,7 +281,7 @@ class RandomProcessFactory(ProcessFactory):
         self.ics = RandomProcessFactory.InitialConditions(argv)
     
     # Uncomment the next line if using Python 2.x...
-# from __future__ import division
+    # from __future__ import division
     class Rand48(object):
         def __init__(self, seed):
             self.n = seed
@@ -301,6 +301,7 @@ class RandomProcessFactory(ProcessFactory):
             if n & (1 << 31):
                 n -= 1 << 32
             return n   
+        
     def generate(self):
         r = RandomProcessFactory.Rand48(0)
         r.srand(self.ics.seed)
@@ -308,13 +309,17 @@ class RandomProcessFactory(ProcessFactory):
         letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
         for i in range(self.ics.num_processes):
             arrival_time = -1
+            # Keep generating arrival times until a valid arrival time is generated
             while (arrival_time < 0 or arrival_time > self.ics.arrival_time_cieling):
                 arrival_time = math.floor(self.ics.map_to_exp(r.drand()))
+            # num_bursts in [1, 100]
             num_bursts = math.trunc(r.drand()*100.0)+1            
             burst_times = []
             io_burst_times = []
+            # Generate burst times for each burst
             for j in range(num_bursts): 
                 burst_times.append(r.drand())
+                # The last burst doesn't use IO
                 if (j < num_bursts - 1):
                     io_burst_times.append(r.drand())
             process = Process(letters[i], arrival_time, num_bursts, burst_times, io_burst_times)
