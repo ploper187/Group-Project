@@ -74,9 +74,12 @@ class ProcessEvent(Event):
     def timestamp_str(self): return "time " + str(self.timestamp) + "ms"
     def queue(self): 
         q = self.simulation.ready
+
+        new_list = sorted(q, key = lambda x: (x.tau, x.name))
+
         s = "[Q "
         if (len(q) > 0):
-                s += " ".join(p.name for p in q)
+                s += " ".join(p.name for p in new_list)
         else:   s += "<empty>"
         s += "]"
         return s
@@ -87,7 +90,7 @@ class NewProcess(ProcessEvent):
     def __str__(self): return " ".join([str(self.process), "[NEW] (arrival time", str(self.process.creation_ts), "ms)", str(self.process.bursts_remaining), "CPU bursts"])
 class ProcessArrival(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), \
-        "(tau", str(self.process.tau) + ")", \
+        "(tau", str(self.process.tau) + "ms)", \
             "arrived; added to ready queue", self.queue()])
 class CPUBurstBegun(ProcessEvent):
     burst_time = -1
@@ -109,13 +112,13 @@ class Preemption(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),\
                               "(tau", str(self.new_process.tau) + "ms) completed I/O and will preempt",\
                               self.process.name, self.queue()])
-class IOBurstStarts(ProcessEvent):
+class Q_IOBurstStarts(ProcessEvent):
     io_burst_time = -1
     def __init__(self, simulation, process, io_burst_time):
         self.simulation = (simulation)
         self.process = (process)
         self.io_burst_time = io_burst_time
-    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "switching out of CPU; will block on I/O until time", str(self.simulation.current_time + self.io_burst_time) + "ms", self.queue()])
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "switching out of CPU; will block on I/O until time", str(self.simulation.current_time + self.io_burst_time + int(self.process.context_switch_duration / 2)) + "ms", self.queue()])
 class IOBurstEnds(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "(tau", str(self.process.tau) + "ms)", "completed I/O; added to ready queue", self.queue()])
 class ProcessCompleted(ProcessEvent):
@@ -138,18 +141,20 @@ class Process:
     io_burst_times = []
     tau = -1
     alpha = -1
+    context_switch_duration = -1
     state = State.READY
 
     def __init__(self, name, timestamp, 
-                 num_bursts, cpu_burst_times, io_burst_times, alpha, tau = 0):
+                 num_bursts, cpu_burst_times, io_burst_times, alpha, context_switch_duration, tau = 0):
         self.name = name
-        self.tau = tau
+        self.tau = math.ceil(tau)
         self.alpha = alpha
         self.creation_ts = timestamp
         self.state = Process.State.READY
         self.burst_times = cpu_burst_times
         self.io_burst_times = io_burst_times
         self.bursts_remaining = len(cpu_burst_times)
+        self.context_switch_duration = context_switch_duration
 
     def time_remaining(self):
         return sum(self.burst_times) + sum(self.io_burst_times)
@@ -211,7 +216,7 @@ class RandomProcessFactory(ProcessFactory):
                     io_burst_times.append(io_burst_time)
 
             initial_tau = 1 / self.ics.lambda_value
-            process = Process(letters[i], arrival_time, num_bursts, burst_times, io_burst_times, self.ics.alpha, initial_tau)
+            process = Process(letters[i], arrival_time, num_bursts, burst_times, io_burst_times, self.ics.alpha, self.ics.context_switch_duration, initial_tau)
             processes.append(process)
         return processes
 
@@ -266,6 +271,8 @@ class Scheduler:
     def __init__(self, processes): 
         self.queue = processes
         self.num_processes = len(self.queue)
+        self.post_ready = []
+        self.post_cpu = []
         self.ready = []
         self.events = []
         self.current_time = 0
@@ -289,14 +296,21 @@ class Scheduler:
              '-- total number of preemptions: {0:0.3f}\n'.format(len(list(filter(lambda cs: cs is Preemption, self.events))))])
  
     def is_completed(self): return len(self.completed) == self.num_processes
-    def logs(self):         return '\n'.join(self.events) + '\n'
+    def logs(self):
+        ret = sorted(self.events, key = lambda x: (x[1], x[2]))
+        string = ""
+        for event in ret:
+            string += event[0] + "\n"
+        return string
     '''
         Log an event, such as a preemption, process completion, or context switch
         e.g. self.log_event(ProcessCompleted(p1))
     '''
     def log_event(self, event):
+        timestamp = self.current_time
         event.timestamp = self.current_time
-        self.events.append(str(event))
+        t = type(event).__name__
+        self.events.append((str(event), timestamp, t))
     def begin(self):
         self.log_event(StartSimulation(self))
     def end(self):
@@ -316,7 +330,7 @@ class Scheduler:
         self.log_event(ProcessTauRecalculated(self, process))
     def process_io_burst(self, process):
         # TODO: Configure process IO bursts begin
-        self.log_event(IOBurstStarts(self, process, process.io_burst_times[process.io_burst_index]))
+        self.log_event(Q_IOBurstStarts(self, process, process.io_burst_times[process.io_burst_index]))
     def process_ends_io_burst(self, process):
         # TODO: Configure process IO bursts end
         self.log_event(IOBurstEnds(self, process))
@@ -331,15 +345,16 @@ class SJFScheduler(Scheduler):
         # SJF Algorithm
         self.begin()
 
+        done = False
         while(not self.is_completed()):
 
             # Check for arrivals
             to_be_removed = []
             for process in self.queue:
                 if process.creation_ts == self.current_time:
-                    self.process_arrived(process)
-
                     self.ready.append(process)
+                    if not self.current_time > 999:
+                        self.process_arrived(process)
                     to_be_removed.append(process)
 
             # Remove any process from the queue that arrived
@@ -350,63 +365,98 @@ class SJFScheduler(Scheduler):
             to_be_removed.clear()
             for blocked_process in self.blocked:
                 if blocked_process.last_blocked_ts == self.current_time:
-                    self.process_ends_io_burst(blocked_process)
 
                     if not blocked_process.is_completed():          # This is sort of unnecessary since it is checked before it enters I/O
                         self.ready.append(blocked_process)          # Should always enter the ready queue from this state
                     else:
                         blocked_process.state = blocked_process.State.COMPLETED
                         self.completed.append(blocked_process)
+                    if not self.current_time > 999:
+                        self.process_ends_io_burst(blocked_process)
                     to_be_removed.append(blocked_process)
 
             # Remove any process from the blocked list that arrived
             for process in to_be_removed:
                 self.blocked.remove(process)
 
+            to_be_removed.clear()
+            for process, completion in self.post_ready:
+                if completion == self.current_time:
+                    if not self.current_time > 999:
+                        self.process_burst(process)
+                    process.burst_index += 1
+                    process.bursts_remaining -= 1
+                    to_be_removed.append((process, completion))
+
+            # Remove any process from the post_ready list that is done with the context switch
+            for process in to_be_removed:
+                self.post_ready.remove(process)
+
+            to_be_removed.clear()
+            for process, completion, destination in self.post_cpu:
+                if completion == self.current_time:
+                    
+                    self.active = None # Release the CPU
+
+                    if destination == 1:
+                        self.blocked.append(process)
+                    else:
+                        self.completed.append(process)
+                        if self.is_completed():
+                            done = True
+                    to_be_removed.append((process, completion, destination))
+
+            if done:
+                break
+
+            # Remove any process from the post_ready list that is done with the context switch
+            for process in to_be_removed:
+                self.post_cpu.remove(process)
+
             # Check if the CPU is available yet
             if self.active == None:
                 # Figure out which process in the ready queue has the lowest tau
-                min_tau = float("inf")
                 shortest_process = None
 
-                for process in self.ready:
-                    # TODO: Tie break
-                    if process.tau < min_tau:
-                        min_tau = process.tau
-                        shortest_process = process
+                new_list = sorted(self.ready, key = lambda x: (x.tau, x.name))
 
-                if shortest_process != None:    # The ready queue could be empty
+                if len(new_list) != 0:    # The ready queue could be empty
+                    shortest_process = new_list[0]
                     shortest_process.state = shortest_process.State.RUNNING
                     self.active = shortest_process
-                    shortest_process.last_active_ts = self.current_time + shortest_process.burst_times[shortest_process.burst_index]
-                    self.process_burst(shortest_process)
-                    shortest_process.burst_index += 1
-                    shortest_process.bursts_remaining -= 1
+                    shortest_process.last_active_ts = self.current_time + shortest_process.burst_times[shortest_process.burst_index] + (shortest_process.context_switch_duration / 2)
                     self.ready.remove(shortest_process)
+                    self.post_ready.append((shortest_process, self.current_time + shortest_process.context_switch_duration / 2))
+                    
             else:
                 # Check if the running process is finished
                 if self.active.last_active_ts == self.current_time:
                     process = self.active
-                    self.process_ends_burst(process)    # Log the completion of this burst
-                    self.active = None                  # Release the CPU
+                    if not self.current_time > 999:
+                        self.process_ends_burst(process)    # Log the completion of this burst
 
                     # Check if this process has completed all of its bursts
                     if process.is_completed():
-                        self.completed.append(process)
+                        self.post_cpu.append((process, self.current_time + process.context_switch_duration / 2, 2))
                         process.state = process.State.COMPLETED
+                        self.process_terminated(process)
                     else:
                         # The process that just finished its burst needs to recalculate tau and start I/O
-                        process.tau = process.alpha * process.burst_times[process.burst_index - 1] + (1 - process.alpha) * process.tau
-                        self.recalculated_tau(process)
+                        process.tau = math.ceil(process.alpha * process.burst_times[process.burst_index - 1] + (1 - process.alpha) * process.tau)
+                        if not self.current_time > 999:
+                            self.recalculated_tau(process)
 
-                        self.process_io_burst(process)
-                        process.last_blocked_ts = self.current_time + process.io_burst_times[process.io_burst_index]
-                        
+                        process.last_blocked_ts = self.current_time + process.io_burst_times[process.io_burst_index] + process.context_switch_duration / 2
+
                         process.state = process.State.BLOCKED
-                        self.blocked.append(process)
+                        if not self.current_time > 999:
+                            self.process_io_burst(process)
+                        process.io_burst_index += 1
+                        self.post_cpu.append((process, self.current_time + process.context_switch_duration / 2, 1))
 
 
             self.current_time += 1
+
 
         self.end()
 
