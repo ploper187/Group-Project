@@ -348,8 +348,21 @@ class SJFScheduler(Scheduler):
         done = False
         while(not self.is_completed()):
 
-            # Check for arrivals
             to_be_removed = []
+            for process, completion in self.post_ready:
+                if completion == self.current_time:
+                    if not self.current_time > 999:
+                        self.process_burst(process)
+                    process.burst_index += 1
+                    process.bursts_remaining -= 1
+                    to_be_removed.append((process, completion))
+
+            # Remove any process from the post_ready list that is done with the context switch
+            for process in to_be_removed:
+                self.post_ready.remove(process)
+
+            # Check for arrivals
+            to_be_removed.clear()
             for process in self.queue:
                 if process.creation_ts == self.current_time:
                     self.ready.append(process)
@@ -379,18 +392,7 @@ class SJFScheduler(Scheduler):
             for process in to_be_removed:
                 self.blocked.remove(process)
 
-            to_be_removed.clear()
-            for process, completion in self.post_ready:
-                if completion == self.current_time:
-                    if not self.current_time > 999:
-                        self.process_burst(process)
-                    process.burst_index += 1
-                    process.bursts_remaining -= 1
-                    to_be_removed.append((process, completion))
-
-            # Remove any process from the post_ready list that is done with the context switch
-            for process in to_be_removed:
-                self.post_ready.remove(process)
+            
 
             to_be_removed.clear()
             for process, completion, destination in self.post_cpu:
