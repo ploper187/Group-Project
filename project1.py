@@ -372,9 +372,9 @@ class Scheduler:
 
         return avg_burst_time
     '''
-
     Turnaround times are to be measured for each process that you simulate. 
          - End-to-end time a process spends in executing a single CPU burst.
+         
          [________________________1 Turnaround Time__________________________]
          * ------------------ . ------------------!----!----!--------------- * 
          |                    |                   \    |    /                |
@@ -414,11 +414,11 @@ class Scheduler:
     '''
     def num_context_switches(self):
         ps = self.completed # All processes
-        n = len(ps)
+        # n = len(ps)
         # BUG: This is not always true w/ preemptions
-        cs = [len(p.burst_times) for p in ps]
+        cs = sum([len(p.burst_times) for p in ps])
 
-        return sum(cs)
+        return cs
     
     def num_preemptions(self):
         return len([e for e in self.events if isinstance(e, Preemption)])
