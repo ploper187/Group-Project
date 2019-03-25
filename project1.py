@@ -684,13 +684,13 @@ class RRScheduler(Scheduler):
 if __name__ == '__main__':
     is_debug = len(sys.argv) > 0 and sys.argv[-1] == "debug"
     # Generate processes
-    processes = RandomProcessFactory(sys.argv).generate()
+    # processes = RandomProcessFactory(sys.argv).generate()
     
     # Queue processes
-    sjf = SJFScheduler(copy(processes))   # Shortest Job First
-    srt = SRTScheduler(copy(processes))   # Shortest Time Remaining 
-    fcfs = FCFSScheduler(copy(processes)) # First Come First Serve
-    rr = RRScheduler(copy(processes))     # Round Robin
+    sjf = SJFScheduler(RandomProcessFactory(sys.argv).generate())   # Shortest Job First
+    srt = SRTScheduler(RandomProcessFactory(sys.argv).generate())   # Shortest Time Remaining 
+    fcfs = FCFSScheduler(RandomProcessFactory(sys.argv).generate()) # First Come First Serve
+    rr = RRScheduler(RandomProcessFactory(sys.argv).generate())     # Round Robin
     
     # Execute (create) Schedules
     sjf.execute()
