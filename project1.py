@@ -401,7 +401,7 @@ class Scheduler:
 
     def avg_cpu_wait_time(self):
         ps = self.completed # All processes
-        n = len(ps)
+        # n = len(ps)
         waits = []
         for p in ps:
             wait = p.completion_ts - p.creation_ts - sum(p.burst_times) - sum(p.io_burst_times) - p.context_switch_duration*len(p.burst_times)
@@ -430,7 +430,7 @@ class Scheduler:
              '-- average CPU burst time: {0:0.3f} ms'.format(self.avg_cpu_burst_time()), \
              '-- average wait time: {0:0.3f} ms'.format(self.avg_cpu_wait_time()), \
              '-- average turnaround time: {0:0.3f} ms'.format(self.avg_cpu_burst_turnaround_time()), \
-             '-- total number of context switches: {0:0.3f}'.format(self.num_context_switches()), \
+             '-- total number of context switches: {0}'.format(self.num_context_switches()), \
              '-- total number of preemptions: {0:0.3f}\n'.format(self.num_preemptions())])
  
     def is_completed(self): return len(self.completed) == self.num_processes
