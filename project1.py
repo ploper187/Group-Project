@@ -475,6 +475,8 @@ class Scheduler:
     def process_ends_io_burst(self, process):
         # TODO: Configure process IO bursts end
         self.log_event(IOBurstEnds(self, process))
+    def process_preempted(self, process, new_process):
+        self.log_event(Preemption(self, process, new_process))
     def process_terminated(self, process):
         # TODO: Configure process termination
         process.completion_ts = self.current_time
