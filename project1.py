@@ -436,69 +436,8 @@ class Scheduler:
         for process in self.queue:
             self.log_event(NewProcess(self, process))
 
-    
-    '''
-    CPU burst time is defined as the amount of time a process is actually using the CPU. 
-        - This measure does not include context switch times.
-    '''
-    # def avg_cpu_burst_time(self):
-    #     ps = self.completed # All processes
-    #     n = len(ps)
-    #     burst_times = [p.avg_cpu_burst_time() for p in ps]
-    #     avg_burst_time = sum(burst_times)/max(n, 1)
-    #     return avg_burst_time
-    # '''
-    # Turnaround times are to be measured for each process that you simulate. 
-    #      - End-to-end time a process spends in executing a single CPU burst.
-         
-    #      [________________________1 Turnaround Time__________________________]
-    #      * ------------------ . ------------------!----!----!--------------- * 
-    #      |                    |                   \    |    /                |
-    #      Arrival              |                   Preemptions                | 
-    #                           Switched in                           Switch out          
-    #     Event on arrival, event on completion of CPU burst             
-    # '''
-    # def avg_cpu_burst_turnaround_time(self):
-    #     ps = self.completed # All processes
-
-    #     tot_turnaround = sum([p.completion_ts - p.creation_ts for p in ps])
-    #     num_bursts = sum([len(p.burst_times) for p in ps])
-
-    #     return tot_turnaround/max(num_bursts, 1)
-
-    # def avg_cpu_wait_time(self):
-    #     ps = self.completed # All processes
-    #     es = self.events
-    #     # n = len(ps)
-    #     tot_wait = 0
-    #     tot_wait += sum([p.completion_ts - p.creation_ts for p in ps])
-    #     tot_wait -= sum([p.total_burst_time + p.total_io_burst_time  for p in ps])
-    #     tot_wait -= sum([p.context_switch_duration*len(p.burst_times) for p in ps])
-    #     start = 0
-    #     for e in es:
-    #         if (isinstance(e, ProcessArrival)):
-    #             start = e.timestamp
-            
-
-    #     num_bursts = sum([len(p.burst_times) for p in ps])
-    #     return tot_wait/max(num_bursts, 1)
-    # '''
-    #     Also note that to count the number of context switches, 
-    #     you should count the number of times a process starts using the CPU.
-    # '''
-    # def num_context_switches(self):
-    #     ps = self.completed # All processes
-    #     # n = len(ps)
-    #     # BUG: This is not always true w/ preemptions
-    #     cs = sum([len(p.burst_times) for p in ps])
-    #     return cs
-    
-    # def num_preemptions(self):
-    #     return len([e for e in self.events if isinstance(e, Preemption) or isinstance(e, ImmediatePreemption)])
-
-
     def __str__(self):
-        self.avg_cpu_wait_time = sum([process.wait / float(len(process.burst_times)) for process in self.completed]) / len(self.completed)
+        self.avg_cpu_wait_time = (sum([process.wait for process in self.completed])) / sum([len(process.burst_times) for process in self.completed])
         
         return '\n'.join(\
             ['Algorithm {0}'.format(self.name),   \
@@ -585,6 +524,9 @@ class SJFScheduler(Scheduler):
         self.post_cpu = []
         self.post_ready = []
         while(not self.is_completed()):
+            post_cpu_process = (self.post_cpu[0][0] if len(self.post_cpu) is not 0 else None)
+            post_ready_process = (self.post_ready[0][0] if len(self.post_ready) is not 0 else None)
+
             to_be_removed = []
             for process, completion in self.post_ready:
                 if completion == self.current_time:
@@ -609,8 +551,8 @@ class SJFScheduler(Scheduler):
                     to_be_removed.append(process)
 
             # Remove any process from the queue that arrived
-            for process in to_be_removed:
-                self.queue.remove(process)
+            # for process in to_be_removed:
+            #     self.queue.remove(process)
 
 
             # Check if anything that is blocking is finished blocking
@@ -653,12 +595,17 @@ class SJFScheduler(Scheduler):
             for process in to_be_removed:
                 self.post_cpu.remove(process)
 
+            new_list = sorted(self.ready, key = lambda x: (x.tau, x.name))
+
+            if len(new_list) != 0:    # The ready queue could be empty
+                shortest_process = new_list[0]
+
+                for process in self.ready:
+                    if not (self.active is None and len(self.post_ready) is 0 and process is shortest_process):
+                        process.wait += 1
             # Check if the CPU is available yet
             if self.active == None:
                 # Figure out which process in the ready queue has the lowest tau
-                shortest_process = None
-
-                new_list = sorted(self.ready, key = lambda x: (x.tau, x.name))
 
                 if len(new_list) != 0:    # The ready queue could be empty
                     shortest_process = new_list[0]
@@ -695,9 +642,6 @@ class SJFScheduler(Scheduler):
                             self.process_io_burst(process)
                         process.io_burst_index += 1
                         self.post_cpu.append((process, self.current_time + process.context_switch_duration / 2, 1))
-
-            for process in self.ready:
-                process.wait += 1
 
             self.current_time += 1
 
@@ -962,7 +906,10 @@ class FCFSScheduler(Scheduler):
             for process in to_be_removed:
                 self.blocked.remove(process)
 
-            
+            for process in self.ready:
+                if not (self.active is None and len(self.post_ready) is 0 and process is self.ready[0]):
+                    process.wait += 1
+                    
             # CPU is available
             if self.active == None:
                 if len(self.ready) > 0:
@@ -1121,7 +1068,11 @@ class RRScheduler(Scheduler):
                 self.blocked.remove(process)
 
             
-            
+
+
+            for process in self.ready:
+                if not (self.active is None and len(self.post_ready) is 0 and process is self.ready[0]):
+                    process.wait += 1
             # CPU is available
             if self.active == None and len(self.post_ready) == 0:
                 if len(self.ready) > 0:
