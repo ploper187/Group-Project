@@ -137,7 +137,7 @@ class CPUBurstBegun(ProcessEvent):
         self.burst_time = burst_time
 
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
-                "started using the CPU for", str(self.burst_time) + "ms", "burst", self.queue()])
+                "started using the CPU for", str(int(self.burst_time)) + "ms", "burst", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 class CPUBurstContinued(ProcessEvent):
     burst_time = -1
@@ -148,16 +148,15 @@ class CPUBurstContinued(ProcessEvent):
         self.burst_time = burst_time
 
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
-                "started using the CPU with", str(self.burst_time) + "ms", "remaining", self.queue()])
+                "started using the CPU with", str(int(self.burst_time)) + "ms", "remaining", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 class CPUBurstEnded(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
-                "completed a CPU burst;", str(self.process.bursts_remaining), "bursts to go", self.queue()])
-
+                "completed a CPU burst;", str(self.process.bursts_remaining), "bursts to go", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 class ProcessTauRecalculated(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", "Recalculated tau =", str(
-        self.process.tau) + "ms", "for process", self.process.name, self.queue()])
+        self.process.tau) + "ms", "for process", self.process.name, (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 # CAM
 class PreemptionSam(ProcessEvent):
@@ -176,9 +175,9 @@ class PreemptionSam(ProcessEvent):
                     ": Time slice expired; no preemption because ready queue is empty", 
                                   self.queue2(self.simulation.ready)])
         else:
-            return " ".join([self.timestamp_str() + ": Time slice expired; process", 
+            return "".join([self.timestamp_str() + ": Time slice expired; process ", 
                                   str(self.process.name),
-                                    "preempted with", str(self.time_left), "ms to go "
+                                    " preempted with ", str(self.time_left), "ms to go "
                                   ,self.queue2(self.simulation.ready)])
 
 class Preemption(ProcessEvent):
@@ -192,7 +191,7 @@ class Preemption(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),
                               "(tau", str(self.new_process.tau) +
                                 "ms) completed I/O and will preempt",
-                              self.process.name, self.queue()])
+                              self.process.name, (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 class ImmediatePreemption(ProcessEvent):
     new_process = None
@@ -205,7 +204,7 @@ class ImmediatePreemption(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),
                               "(tau", str(self.new_process.tau) +
                                 "ms) will preempt",
-                              self.process.name, self.queue()])
+                              self.process.name, (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 class Q_IOBurstStarts(ProcessEvent):
     io_burst_time = -1
@@ -216,19 +215,19 @@ class Q_IOBurstStarts(ProcessEvent):
         self.io_burst_time = io_burst_time
 
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "switching out of CPU; will block on I/O until time", str(
-        self.simulation.current_time + self.io_burst_time + int(self.process.context_switch_duration / 2)) + "ms", self.queue()])
+        self.simulation.current_time + self.io_burst_time + int(self.process.context_switch_duration / 2)) + "ms", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 
 class IOBurstEnds(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "(tau", str(
-        self.process.tau) + "ms)", "completed I/O; added to ready queue", self.queue()])
+        self.process.tau) + "ms)", "completed I/O; added to ready queue", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 class IOBurstEndsSam(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "completed I/O; added to ready queue", self.queue2(self.simulation.ready)])
 
 class ProcessCompleted(ProcessEvent):
     def __str__(self): return " ".join(
-        [self.timestamp_str() + ":", str(self.process), "terminated", self.queue()])
+        [self.timestamp_str() + ":", str(self.process), "terminated", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
 
 
 class Process:
@@ -256,7 +255,8 @@ class Process:
     state = State.READY
     status = "fresh"
     last_burst = -1
-    turnaround = 0
+    wait = 0
+    num_times_waited = 0
 
     def __init__(self, name, timestamp,
                  num_bursts, cpu_burst_times, io_burst_times, alpha, context_switch_duration, tau=0):
@@ -405,6 +405,8 @@ class Scheduler:
     # Number of processes that the schedule started with
     processes = 0
 
+    sam = False
+
     # Stats
     avg_cpu_burst_time = 0
     avg_cpu_wait_time = 0
@@ -494,8 +496,10 @@ class Scheduler:
 
 
     def __str__(self):
-        self.avg_turnaround_time = sum(process.turnaround for process in self.completed) / len(self.completed)
-        self.avg_cpu_wait_time = self.avg_turnaround_time - self.avg_cpu_burst_time
+        # self.avg_turnaround_time = sum(process.turnaround for process in self.completed) / len(self.completed)
+        print(self.completed[0].wait, self.completed[1].wait)
+
+        self.avg_cpu_wait_time = sum([process.wait / process.num_times_waited for process in self.completed if process.num_times_waited is not 0]) / len(self.completed)
         return '\n'.join(\
             ['Algorithm {0}'.format(self.name),   \
              '-- average CPU burst time: {0:0.3f} ms'.format(float(self.avg_cpu_burst_time)), \
@@ -509,7 +513,7 @@ class Scheduler:
         ret = sorted(self.log, key = lambda x: (x[1], x[2]))
         string = ""
         for event in ret:
-            string += event[0] + "\n"
+            string += event[0] + ("\n" if event is not ret[-1] else "")
         return string
     '''
         Log an event, such as a preemption, process completion, or context switch
@@ -556,7 +560,6 @@ class Scheduler:
     def process_terminated(self, process):
         # TODO: Configure process termination
         process.completion_ts = self.current_time
-        process.turnaround = self.current_time - process.creation_ts
         self.log_event(ProcessCompleted(self, process))
     def process_arrived_sam(self, process):
         # TODO: Configure process arrival
@@ -574,6 +577,7 @@ class SJFScheduler(Scheduler):
     def execute(self):
         # SJF Algorithm
         self.begin()
+        self.avg_turnaround_time = sum([sum([burst + process.context_switch_duration for burst in process.burst_times]) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
 
         done = False
         self.post_cpu = []
@@ -704,7 +708,9 @@ class SRTScheduler(Scheduler):
         self.begin()
 
         self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
-
+        self.avg_turnaround_time = sum([sum([burst + process.context_switch_duration for burst in process.burst_times]) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        
+        
         while(not self.is_completed()):
 
             # ----------------------------------- Post Ready -> CPU -----------------------------------
@@ -745,6 +751,7 @@ class SRTScheduler(Scheduler):
                     # Done with I/O
                     process.status = "fresh"
                     self.ready.append(process)
+                    process.num_times_waited += 1
                     if self.current_time <= 999:
                         if self.active is not None and self.active is not "Switching":
                             if process.tau >= self.active.running_tau:
@@ -776,6 +783,8 @@ class SRTScheduler(Scheduler):
                         else:
                             process.status = "fresh"
                         self.ready.append(process)
+                        process.num_times_waited += 1
+
 
                     self.post_cpu = None
                     self.active = None  # Release the CPU
@@ -788,11 +797,12 @@ class SRTScheduler(Scheduler):
             sorted_queue = sorted(self.ready, key=lambda x: (x.running_tau, x.name))
             if len(sorted_queue) != 0:  
                 best_process = sorted_queue[0]
-                if self.active is None:        # Make sure the queue isn't empty
+                if self.active is None:
                     if self.post_ready is None:
                         best_process.state = best_process.State.RUNNING
                         self.post_ready = (best_process, self.current_time + best_process.context_switch_duration / 2)
                         self.ready.remove(best_process)
+                        self.num_context_switches += 1
                 elif self.active != "Switching":
                     # Check for preemption (running tau is the estimated remaining time on the CPU)
                     if best_process.tau < self.active.running_tau:
@@ -806,6 +816,9 @@ class SRTScheduler(Scheduler):
                         self.post_cpu = (self.active, self.current_time + self.active.context_switch_duration / 2, "ready")
                         self.active = "Switching"
             
+            for process in self.ready:
+                process.wait += 1
+
             # ----------------------------------- CPU -> Post CPU -----------------------------------
 
             if self.active != None and self.active != "Switching":
@@ -841,6 +854,7 @@ class SRTScheduler(Scheduler):
 class FCFSScheduler(Scheduler):
     name = "FCFS"
     def execute(self):
+        self.sam = True
         self.begin()
         done = False
         self.post_cpu = []
@@ -865,6 +879,7 @@ class FCFSScheduler(Scheduler):
                             done = True
                     # if meant for ready queue
                     elif destination == 3:
+                        process.num_times_waited += 1
                         if push_back_ready:
                             self.ready.append(process)
                         else:
@@ -900,6 +915,7 @@ class FCFSScheduler(Scheduler):
             to_be_removed.clear()
             for process in self.queue:
                 if process.creation_ts == self.current_time:
+                    process.num_times_waited += 1
                     self.ready.append(process)
                     if not self.current_time > 999:
                         self.process_arrived_sam(process)
@@ -916,6 +932,7 @@ class FCFSScheduler(Scheduler):
             for blocked_process in self.blocked:
                 if blocked_process.last_blocked_ts == self.current_time:
                     if not blocked_process.is_completed():
+                        blocked_process.num_times_waited += 1
                         self.ready.append(blocked_process)
                     else:
                         blocked_process.state = blocked_process.State.COMPLETED
@@ -947,7 +964,7 @@ class FCFSScheduler(Scheduler):
                 # check if the currently running process is finished
                 if self.active.last_active_ts == self.current_time:
                     process = self.active
-                    if not self.current_time > 999:
+                    if not self.current_time > 999 and not process.is_completed():
                         self.process_ends_burst(process) # LOG completion of burst
 
                     # check if this process has COMPLETED all of its bursts
@@ -977,6 +994,7 @@ class RRScheduler(Scheduler):
 
     def execute(self, args):
 
+        self.sam = True
         self.begin()
         time_slice = int(args[7])
         push_back_ready = (0 if len(args) == 9 and args[8] == 'BEGINNING' else 1)
@@ -1009,7 +1027,9 @@ class RRScheduler(Scheduler):
                         # set time slice counter to -1 (waiting for a new process to start)
                         time_slice_counter = -1
                         if push_back_ready:
+                            process.status = "preempted"
                             self.ready.append(process)
+                            process.num_times_waited += 1
                             #print( 'time {0}ms: process {1} added to back of ready'.format(self.current_time, process) )
                         else:
                             self.ready.insert(0, process)
@@ -1031,7 +1051,10 @@ class RRScheduler(Scheduler):
             for process, completion in self.post_ready:
                 if completion == self.current_time:
                     if not self.current_time > 999:
-                        self.process_burst(process)
+                        if process.status == "fresh":
+                            self.process_burst(process)
+                        else:
+                            self.process_continued_burst(process)
                     process.burst_index += 1
                     process.bursts_remaining -= 1
                     # reset time slice counter when we start a burst
@@ -1047,6 +1070,8 @@ class RRScheduler(Scheduler):
             to_be_removed.clear()
             for process in self.queue:
                 if process.creation_ts == self.current_time:
+                    process.status = "fresh"
+                    process.num_times_waited += 1
                     self.ready.append(process)
                     if not self.current_time > 999:
                         self.process_arrived_sam(process)
@@ -1062,6 +1087,7 @@ class RRScheduler(Scheduler):
             for blocked_process in self.blocked:
                 if blocked_process.last_blocked_ts == self.current_time:
                     if not blocked_process.is_completed():
+                        blocked_process.num_times_waited += 1
                         self.ready.append(blocked_process)
                     else:
                         blocked_process.state = blocked_process.State.COMPLETED
@@ -1076,8 +1102,8 @@ class RRScheduler(Scheduler):
 
             
             
-            #l CPU is available
-            if self.active == None:
+            # CPU is available
+            if self.active == None and len(self.post_ready) == 0:
                 if len(self.ready) > 0:
                     # get the next process in line
                     process = self.ready.pop(0)
@@ -1088,7 +1114,7 @@ class RRScheduler(Scheduler):
                             self.current_time + process.burst_times[process.burst_index] + (process.context_switch_duration / 2)
                     # append the process and the time it will be able to use the CPU
                     # we will process the cpu usage event later
-                    self.post_ready.append((process, self.current_time+process.context_switch_duration /2))
+                    self.post_ready.append((process, self.current_time + process.context_switch_duration / 2))
 
             # CPU is not available
             elif self.active is not "Switching":
@@ -1096,7 +1122,7 @@ class RRScheduler(Scheduler):
                 if self.active.last_active_ts == self.current_time:
                     process = self.active
                     time_slice_counter = -1
-                    if not self.current_time > 999:
+                    if not self.current_time > 999 and not process.is_completed():
                         self.process_ends_burst(process) # LOG completion of burst
 
                     # check if this process has COMPLETED all of its bursts
@@ -1174,8 +1200,11 @@ if __name__ == '__main__':
 
     # Output process logs
     print(sjf.logs())
+    print()
     print(srt.logs())
+    print()
     print(fcfs.logs())
+    print()
     print(rr.logs())
 
     # Output statistics to file
