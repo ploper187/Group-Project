@@ -369,7 +369,6 @@ class Scheduler:
         n = len(ps)
         burst_times = [p.avg_cpu_burst_time() for p in ps]
         avg_burst_time = sum(burst_times)/max(n, 1)
-
         return avg_burst_time
     '''
     Turnaround times are to be measured for each process that you simulate. 
@@ -384,30 +383,28 @@ class Scheduler:
     '''
     def avg_cpu_burst_turnaround_time(self):
         ps = self.completed # All processes
-        # n = len(ps)
-        turnarounds = []
-        for p in ps:
-            turnaround = p.completion_ts - p.creation_ts 
-            # print(self.name, "creation cs:", p.creation_ts, "end_cs:", p.completion_ts)
-            # turnaround = 0
-            # for e in p.events:
-            #     if (isinstance(e, CPUBurstBegun)):
-            #         start_time = e.timestamp
-            #     elif (isinstance(e, CPUBurstEnded) or isinstance(e, Q_IOBurstStarts)):
-            #         turnaround += e.timestamp-start_time
-            #         start_time = 0
-            turnarounds.append(turnaround/len(p.burst_times))                
-        return mean(turnarounds) if len(turnarounds) > 0 else 0
+
+        tot_turnaround = sum([p.completion_ts - p.creation_ts for p in ps])
+        num_bursts = sum([len(p.burst_times) for p in ps])
+
+        return tot_turnaround/max(num_bursts, 1)
 
     def avg_cpu_wait_time(self):
         ps = self.completed # All processes
+        es = self.events
         # n = len(ps)
-        waits = []
-        for p in ps:
-            wait = p.completion_ts - p.creation_ts - sum(p.burst_times) - sum(p.io_burst_times) - p.context_switch_duration*len(p.burst_times)
-            waits.append(wait/len(p.burst_times))
-    
-        return mean(waits) if len(waits) > 0 else 0
+        tot_wait = 0
+        tot_wait += sum([p.completion_ts - p.creation_ts for p in ps])
+        tot_wait -= sum([sum(p.burst_times) + sum(p.io_burst_times)  for p in ps])
+        tot_wait -= sum([p.context_switch_duration*len(p.burst_times) for p in ps])
+        start = 0
+        for e in es:
+            if (isinstance(e, ProcessArrival)):
+                start = e.timestamp
+            
+
+        num_bursts = sum([len(p.burst_times) for p in ps])
+        return tot_wait/max(num_bursts, 1)
     '''
         Also note that to count the number of context switches, 
         you should count the number of times a process starts using the CPU.
@@ -417,7 +414,6 @@ class Scheduler:
         # n = len(ps)
         # BUG: This is not always true w/ preemptions
         cs = sum([len(p.burst_times) for p in ps])
-
         return cs
     
     def num_preemptions(self):
@@ -431,7 +427,7 @@ class Scheduler:
              '-- average wait time: {0:0.3f} ms'.format(self.avg_cpu_wait_time()), \
              '-- average turnaround time: {0:0.3f} ms'.format(self.avg_cpu_burst_turnaround_time()), \
              '-- total number of context switches: {0}'.format(self.num_context_switches()), \
-             '-- total number of preemptions: {0:0.3f}\n'.format(self.num_preemptions())])
+             '-- total number of preemptions: {0}\n'.format(self.num_preemptions())])
  
     def is_completed(self): return len(self.completed) == self.num_processes
     def logs(self):
@@ -452,10 +448,8 @@ class Scheduler:
         self.events.append(event)
         t = type(event).__name__
         self.log.append((str(event), timestamp, t))
-    def begin(self):
-        self.log_event(StartSimulation(self))
-    def end(self):
-        self.log_event(EndSimulation(self))
+    def begin(self): self.log_event(StartSimulation(self))
+    def end(self):   self.log_event(EndSimulation(self))
     def process_arrived(self, process):
         # TODO: Configure process arrival
         self.log_event(ProcessArrival(self, process))
