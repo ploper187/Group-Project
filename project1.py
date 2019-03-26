@@ -127,6 +127,16 @@ class CPUBurstBegun(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
                 "started using the CPU for", str(self.burst_time) + "ms", "burst", self.queue()])
 
+class CPUBurstContinued(ProcessEvent):
+    burst_time = -1
+
+    def __init__(self, simulation, process, burst_time):
+        self.simulation = (simulation)
+        self.process = (process)
+        self.burst_time = burst_time
+
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
+                "started using the CPU with", str(self.burst_time) + "ms", "remaining", self.queue()])
 
 class CPUBurstEnded(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
@@ -197,6 +207,7 @@ class Process:
     alpha = -1
     context_switch_duration = -1
     state = State.READY
+    status = "fresh"
 
     def __init__(self, name, timestamp,
                  num_bursts, cpu_burst_times, io_burst_times, alpha, context_switch_duration, tau=0):
@@ -459,6 +470,9 @@ class Scheduler:
     def process_burst(self, process):
         # TODO: Configure process CPU burst begins
         self.log_event(CPUBurstBegun(self, process, process.burst_times[process.burst_index]))
+    def process_continued_burst(self, process):
+        # TODO: Configure process CPU burst begins
+        self.log_event(CPUBurstContinued(self, process, process.burst_times[process.burst_index]))
     def process_ends_burst(self, process):
         # TODO: Configure process CPU burst ends
         self.log_event(CPUBurstEnded(self, process))
@@ -615,9 +629,10 @@ class SRTScheduler(Scheduler):
         self.begin()
 
         while(not self.is_completed()):
-            # ----------------------------------- Post Ready -> CPU -----------------------------------
             # print(self.current_time, "CPU\tPOST CPU\tREADY\tPOST READY\tBLOCKED\tCOMPLETED")
             # print(self.active, self.post_cpu, self.ready, self.post_ready, self.blocked, self.completed)
+
+            # ----------------------------------- Post Ready -> CPU -----------------------------------
             
             if self.post_ready != None:
                 process, ready_time = self.post_ready
@@ -627,7 +642,10 @@ class SRTScheduler(Scheduler):
                     self.active = process
                     print("Adding", process, "to the CPU with tau", process.running_tau)
                     if self.current_time <= 999:
-                        self.process_burst(process)
+                        if process.status == "preempted":
+                            self.process_continued_burst(process)
+                        else:
+                            self.process_burst(process)
                     self.post_ready = None
 
             # ----------------------------------- New -> Ready -----------------------------------
@@ -635,6 +653,7 @@ class SRTScheduler(Scheduler):
             to_be_removed = []
             for process in self.queue:
                 if process.creation_ts == self.current_time:
+                    process.status = "fresh"
                     self.ready.append(process)
                     if self.current_time <= 999:
                         self.process_arrived(process)
@@ -649,6 +668,7 @@ class SRTScheduler(Scheduler):
             for process in self.blocked:
                 if process.last_blocked_ts == self.current_time:
                     # Done with I/O
+                    process.status = "fresh"
                     self.ready.append(process)
                     if self.current_time <= 999:
                         self.process_ends_io_burst(process)
@@ -695,6 +715,7 @@ class SRTScheduler(Scheduler):
                         process.io_burst_index += 1
                         self.blocked.append(process)
                     elif destination == "ready":
+                        process.status = "preempted"
                         self.ready.append(process)
 
                     self.post_cpu = None
