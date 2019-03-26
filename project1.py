@@ -3,6 +3,7 @@ __right__ = "right 2019, Cameron Scott, Adam Kuniholm, and Sam Fite"
 __credits__ = ["Cameron Scott", "Adam Kuniholm", "Sam Fite"]
 __license__ = "MIT"
 
+LIMIT_TIME = 999
 
 from statistics import mean
 import sys
@@ -517,7 +518,7 @@ class SJFScheduler(Scheduler):
     def execute(self):
         # SJF Algorithm
         self.begin()
-        self.avg_turnaround_time = sum([sum([burst + process.context_switch_duration for burst in process.burst_times]) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        # self.avg_turnaround_time = sum([sum([burst + process.context_switch_duration for burst in process.burst_times]) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
         self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
 
         done = False
@@ -531,7 +532,7 @@ class SJFScheduler(Scheduler):
             for process, completion in self.post_ready:
                 if completion == self.current_time:
                     self.num_context_switches += 1
-                    if not self.current_time > 999:
+                    if not self.current_time > LIMIT_TIME:
                         self.process_burst(process)
                     process.burst_index += 1
                     process.bursts_remaining -= 1
@@ -546,7 +547,8 @@ class SJFScheduler(Scheduler):
             for process in self.queue:
                 if process.creation_ts == self.current_time:
                     self.ready.append(process)
-                    if not self.current_time > 999:
+                    process.started_last_burst = self.current_time
+                    if not self.current_time > LIMIT_TIME:
                         self.process_arrived(process)
                     to_be_removed.append(process)
 
@@ -562,10 +564,11 @@ class SJFScheduler(Scheduler):
 
                     if not blocked_process.is_completed():          # This is sort of unnecessary since it is checked before it enters I/O
                         self.ready.append(blocked_process)          # Should always enter the ready queue from this state
+                        blocked_process.started_last_burst = self.current_time
                     else:
                         blocked_process.state = blocked_process.State.COMPLETED
                         self.completed.append(blocked_process)
-                    if not self.current_time > 999:
+                    if not self.current_time > LIMIT_TIME:
                         self.process_ends_io_burst(blocked_process)
                     to_be_removed.append(blocked_process)
 
@@ -614,12 +617,13 @@ class SJFScheduler(Scheduler):
                     shortest_process.last_active_ts = self.current_time + shortest_process.burst_times[shortest_process.burst_index] + (shortest_process.context_switch_duration / 2)
                     self.ready.remove(shortest_process)
                     self.post_ready.append((shortest_process, self.current_time + shortest_process.context_switch_duration / 2))
-                    
             else:
                 # Check if the running process is finished
                 if self.active.last_active_ts == self.current_time:
                     process = self.active
-                    if not self.current_time > 999:
+                    process.turnaround += self.current_time + 2 - process.started_last_burst
+                    
+                    if not self.current_time > LIMIT_TIME:
                         self.process_ends_burst(process)    # Log the completion of this burst
 
                     # Check if this process has completed all of its bursts
@@ -632,20 +636,20 @@ class SJFScheduler(Scheduler):
                         # The process that just finished its burst needs to recalculate tau and start I/O
                         process.tau = math.ceil(process.alpha * process.burst_times[process.burst_index - 1] + (1 - process.alpha) * process.tau)
                         process.running_tau = process.tau
-                        if not self.current_time > 999:
+                        if not self.current_time > LIMIT_TIME:
                             self.recalculated_tau(process)
 
                         process.last_blocked_ts = self.current_time + process.io_burst_times[process.io_burst_index] + process.context_switch_duration / 2
 
                         process.state = process.State.BLOCKED
-                        if not self.current_time > 999:
+                        if not self.current_time > LIMIT_TIME:
                             self.process_io_burst(process)
                         process.io_burst_index += 1
                         self.post_cpu.append((process, self.current_time + process.context_switch_duration / 2, 1))
 
             self.current_time += 1
 
-
+        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
         self.end()
 
 
@@ -659,7 +663,6 @@ class SRTScheduler(Scheduler):
 
         self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
         
-        
         while(not self.is_completed()):
 
             # ----------------------------------- Post Ready -> CPU -----------------------------------
@@ -670,7 +673,7 @@ class SRTScheduler(Scheduler):
                     # The context switch is complete and we can move the process in to the CPU
                     process.last_active_ts = self.current_time + process.burst_times[process.burst_index]
                     self.active = process
-                    if self.current_time <= 999:
+                    if self.current_time <= LIMIT_TIME:
                         if process.status == "preempted":
                             self.process_continued_burst(process)
                         else:
@@ -686,7 +689,8 @@ class SRTScheduler(Scheduler):
                     process.last_burst = process.burst_times[0]
                     process.num_times_waited += 1
                     self.ready.append(process)
-                    if self.current_time <= 999:
+                    process.started_last_burst = self.current_time
+                    if self.current_time <= LIMIT_TIME:
                         self.process_arrived(process)
                     to_be_removed.append(process)
 
@@ -701,8 +705,9 @@ class SRTScheduler(Scheduler):
                     # Done with I/O
                     process.status = "fresh"
                     self.ready.append(process)
+                    process.started_last_burst = self.current_time
                     process.num_times_waited += 1
-                    if self.current_time <= 999:
+                    if self.current_time <= LIMIT_TIME:
                         if self.active is not None and self.active is not "Switching":
                             if process.tau >= self.active.running_tau:
                                 self.process_ends_io_burst(process)
@@ -721,18 +726,18 @@ class SRTScheduler(Scheduler):
                 process, ready_time, destination = self.post_cpu
                 if ready_time == self.current_time:
 
+                    process.turnaround += self.current_time - process.started_last_burst
                     if destination == "completed":
-                        process.turnaround += self.current_time - process.started_last_burst
                         self.completed.append(process)
                         if self.is_completed():
                             break
                     elif destination == "io":
-                        process.turnaround += self.current_time - process.started_last_burst
                         process.last_burst = process.burst_times[process.burst_index]
                         process.last_blocked_ts = self.current_time + process.io_burst_times[process.io_burst_index]
                         process.io_burst_index += 1
                         self.blocked.append(process)
                     elif destination == "ready":
+                        process.started_last_burst = self.current_time
                         if process.tau is not process.running_tau:
                             process.status = "preempted"
                         else:
@@ -758,8 +763,6 @@ class SRTScheduler(Scheduler):
                     if self.post_ready is None:
                         best_process.state = best_process.State.RUNNING
                         self.post_ready = (best_process, self.current_time + best_process.context_switch_duration / 2)
-                        if best_process.status == "fresh":
-                            best_process.started_last_burst = self.current_time
                         self.ready.remove(best_process)
                         self.num_context_switches += 1
                 elif self.active != "Switching":
@@ -767,7 +770,7 @@ class SRTScheduler(Scheduler):
                     if best_process.tau < self.active.running_tau:
                         self.num_preemptions += 1
                         # Need to remove process from CPU
-                        if self.current_time <= 999:
+                        if self.current_time <= LIMIT_TIME:
                             if best_process.last_blocked_ts == self.current_time - 1:
                                 self.process_immediate_preempted(self.active, best_process)
                             else:
@@ -784,14 +787,14 @@ class SRTScheduler(Scheduler):
                     self.active.burst_index += 1
                     destination = ("completed" if self.active.is_completed() else "io")
                     self.active.tau = math.ceil(self.active.alpha * self.active.last_burst + (1 - self.active.alpha) * self.active.tau)
-                    if self.current_time <= 999:
+                    if self.current_time <= LIMIT_TIME:
                         self.recalculated_tau(self.active)
                         if destination == "io":
                             self.process_io_burst(self.active)
                     self.active.running_tau = self.active.tau
                     self.post_cpu = (self.active, self.current_time + self.active.context_switch_duration / 2, destination)
                     self.active.bursts_remaining -= 1
-                    if self.current_time <= 999:
+                    if self.current_time <= LIMIT_TIME:
                         self.process_ends_burst(self.active)
                     if destination == "completed":
                         self.active.completion_ts = self.current_time
@@ -819,6 +822,8 @@ class FCFSScheduler(Scheduler):
         done = False
         self.post_cpu = []
         self.post_ready = []
+
+
         while ( not self.is_completed()):
 
             to_be_removed = []
@@ -827,6 +832,7 @@ class FCFSScheduler(Scheduler):
                 if completion == self.current_time:
                     # FREE the CPU
                     self.active = None
+                    process.turnaround += self.current_time - process.started_last_burst
                     # if meant for IO
                     if destination == 1:
                         process.io_burst_index += 1
@@ -840,6 +846,7 @@ class FCFSScheduler(Scheduler):
                     # if meant for ready queue
                     elif destination == 3:
                         process.num_times_waited += 1
+                        process.started_last_burst = self.current_time
                         if push_back_ready:
                             self.ready.append(process)
                         else:
@@ -859,7 +866,7 @@ class FCFSScheduler(Scheduler):
             to_be_removed.clear()
             for process, completion in self.post_ready:
                 if completion == self.current_time:
-                    if not self.current_time > 999:
+                    if not self.current_time > LIMIT_TIME:
                         self.process_burst(process)
                     self.num_context_switches += 1
                     process.burst_index += 1
@@ -878,7 +885,8 @@ class FCFSScheduler(Scheduler):
                 if process.creation_ts == self.current_time:
                     process.num_times_waited += 1
                     self.ready.append(process)
-                    if not self.current_time > 999:
+                    process.started_last_burst = self.current_time
+                    if not self.current_time > LIMIT_TIME:
                         self.process_arrived_sam(process)
                     to_be_removed.append(process)
             
@@ -890,15 +898,17 @@ class FCFSScheduler(Scheduler):
             
             # check if any blocked processes are done with IO
             to_be_removed.clear()
-            for blocked_process in self.blocked:
+            blocked_temp = sorted(self.blocked, key=lambda x : x.name)
+            for blocked_process in blocked_temp:
                 if blocked_process.last_blocked_ts == self.current_time:
                     if not blocked_process.is_completed():
                         blocked_process.num_times_waited += 1
                         self.ready.append(blocked_process)
+                        blocked_process.started_last_burst = self.current_time
                     else:
                         blocked_process.state = blocked_process.State.COMPLETED
                         self.completed.append(blocked_process)
-                    if not self.current_time > 999:
+                    if not self.current_time > LIMIT_TIME:
                         self.process_ends_io_burst_sam(blocked_process)
                     to_be_removed.append(blocked_process)
             
@@ -928,7 +938,7 @@ class FCFSScheduler(Scheduler):
                 # check if the currently running process is finished
                 if self.active.last_active_ts == self.current_time:
                     process = self.active
-                    if not self.current_time > 999 and not process.is_completed():
+                    if not self.current_time > LIMIT_TIME and not process.is_completed():
                         self.process_ends_burst(process) # LOG completion of burst
 
                     # check if this process has COMPLETED all of its bursts
@@ -942,7 +952,7 @@ class FCFSScheduler(Scheduler):
                         process.last_blocked_ts = self.current_time + process.io_burst_times[process.io_burst_index] + process.context_switch_duration / 2
                         
                         process.state = process.State.BLOCKED
-                        if not self.current_time > 999:
+                        if not self.current_time > LIMIT_TIME:
                             self.process_io_burst(process)
                         # append process, when it will be done with context switch, and the number 1 for IO
                         self.post_cpu.append((process, self.current_time + process.context_switch_duration / 2, 1))
@@ -950,6 +960,8 @@ class FCFSScheduler(Scheduler):
 
             self.current_time += 1
  
+        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+
         self.end()
 
 ''' Round Robin Process Scheduler '''
@@ -977,6 +989,7 @@ class RRScheduler(Scheduler):
                     # FREE the CPU
                     self.active = None
                     # if meant for IO
+                    process.turnaround += self.current_time - process.started_last_burst
                     if destination == 1:
                         process.io_burst_index += 1
                         self.blocked.append(process)
@@ -991,13 +1004,12 @@ class RRScheduler(Scheduler):
                         # set time slice counter to -1 (waiting for a new process to start)
                         time_slice_counter = -1
                         process.status = "preempted"
+                        process.started_last_burst = self.current_time
                         if push_back_ready:
                             self.ready.append(process)
                             process.num_times_waited += 1
-                            #print( 'time {0}ms: process {1} added to back of ready'.format(self.current_time, process) )
                         else:
                             self.ready.insert(0, process)
-                            #print( 'process {0} added to front of read'.format(process) )
                     to_be_removed.append((process,  completion, destination) )
 
             # if the scheduler is done
@@ -1014,10 +1026,9 @@ class RRScheduler(Scheduler):
             to_be_removed.clear()
             for process, completion in self.post_ready:
                 if completion == self.current_time:
-                    if not self.current_time > 999:
+                    if not self.current_time > LIMIT_TIME:
                         if process.status == "fresh":
                             self.process_burst(process)
-                            process.started_last_burst = self.current_time
                         else:
                             self.process_continued_burst(process)
                     self.num_context_switches += 1
@@ -1038,8 +1049,9 @@ class RRScheduler(Scheduler):
                 if process.creation_ts == self.current_time:
                     process.status = "fresh"
                     process.num_times_waited += 1
+                    process.started_last_burst = self.current_time
                     self.ready.append(process)
-                    if not self.current_time > 999:
+                    if not self.current_time > LIMIT_TIME:
                         self.process_arrived_sam(process)
                     to_be_removed.append(process)
             
@@ -1050,8 +1062,10 @@ class RRScheduler(Scheduler):
             
             # check if any blocked processes are done with IO
             to_be_removed.clear()
-            for blocked_process in self.blocked:
+            blocked_temp = sorted(self.blocked, key=lambda x : x.name)
+            for blocked_process in blocked_temp:
                 if blocked_process.last_blocked_ts == self.current_time:
+                    blocked_process.started_last_burst = self.current_time
                     if not blocked_process.is_completed():
                         blocked_process.num_times_waited += 1
                         self.ready.append(blocked_process)
@@ -1059,16 +1073,13 @@ class RRScheduler(Scheduler):
                     else:
                         blocked_process.state = blocked_process.State.COMPLETED
                         self.completed.append(blocked_process)
-                    if not self.current_time > 999:
+                    if not self.current_time > LIMIT_TIME:
                         self.process_ends_io_burst_sam(blocked_process)
                     to_be_removed.append(blocked_process)
             
             #remove any process from the blocked list that arrived
             for process in to_be_removed:
                 self.blocked.remove(process)
-
-            
-
 
             for process in self.ready:
                 if not (self.active is None and len(self.post_ready) is 0 and process is self.ready[0]):
@@ -1093,7 +1104,7 @@ class RRScheduler(Scheduler):
                 if self.active.last_active_ts == self.current_time:
                     process = self.active
                     time_slice_counter = -1
-                    if not self.current_time > 999 and not process.is_completed():
+                    if not self.current_time > LIMIT_TIME and not process.is_completed():
                         self.process_ends_burst(process) # LOG completion of burst
 
                     # check if this process has COMPLETED all of its bursts
@@ -1108,7 +1119,7 @@ class RRScheduler(Scheduler):
                         # BLOCKED
                         process.last_blocked_ts = self.current_time + process.io_burst_times[process.io_burst_index] + process.context_switch_duration / 2
                         process.state = process.State.BLOCKED
-                        if not self.current_time > 999:
+                        if not self.current_time > LIMIT_TIME:
                             self.process_io_burst(process)
                         # append process, when it will be done with context switch, and the number 1 for IO
                         self.post_cpu.append((process, self.current_time + process.context_switch_duration / 2, 1))
@@ -1119,7 +1130,7 @@ class RRScheduler(Scheduler):
                     # if there are no processes to be fed into CPU, just log it
                     if (len(self.ready) == 0):
                         time_slice_counter = 0
-                        if not self.current_time > 999:
+                        if not self.current_time > LIMIT_TIME:
                             # CAM
                             self.process_preempted_sam(self.active, self.active, 0)
                     # if we can PREEMPT 
@@ -1136,7 +1147,7 @@ class RRScheduler(Scheduler):
                         # put old process in post_cpu queue
                         self.post_cpu.append((old_process, self.current_time + (old_process.context_switch_duration / 2), 3) )
                         # reset time slice counter to wait until another process start to begin tslice
-                        if not self.current_time > 999:
+                        if not self.current_time > LIMIT_TIME:
                             time_left = int(old_process.last_active_ts - self.current_time)
                             # CAM
                             self.process_preempted_sam(old_process, self.ready[0], time_left)
@@ -1146,6 +1157,9 @@ class RRScheduler(Scheduler):
             # time slice counter is negative when there is no process running
             if ( time_slice_counter >= 0 ):
                 time_slice_counter += 1
+
+
+        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
 
         self.end()
 
