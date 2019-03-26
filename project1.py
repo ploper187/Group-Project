@@ -860,7 +860,7 @@ class SRTScheduler(Scheduler):
             # time.sleep(0.1)
             self.current_time += 1
 
-        self.avg_turnaround_time = sum([process.turnaround / len(process.burst_times) for process in self.completed]) / len(self.completed)
+        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
 
         self.end()
 
