@@ -10,6 +10,7 @@ import random
 import math
 from copy import copy
 from enum import Enum
+import time
 '''
 CS 4210 Operating Systems
 Group Project 1 - CPU Scheduling Simulation
@@ -486,6 +487,8 @@ class SJFScheduler(Scheduler):
         self.begin()
 
         done = False
+        self.post_cpu = []
+        self.post_ready = []
         while(not self.is_completed()):
 
             to_be_removed = []
@@ -611,61 +614,72 @@ class SRTScheduler(Scheduler):
         # TODO: Implement
         self.begin()
 
-        done = False
         while(not self.is_completed()):
-            # ----------------------------------- New -> Ready -----------------------------------
-
-            to_be_removed = []
-            for process in self.queue:
-                if process.creation_ts == self.current_time:
-                    self.ready.append(process)
-                    self.process_arrived(process)
-                    to_be_removed.append(process)
-
-            for process in to_be_removed:
-                self.queue.remove(process)
-
-            # ----------------------------------- Ready -> Post Ready -----------------------------------
-            
-            '''
-                A process should be sent to Post Ready if the CPU is available
-            '''
-            sorted_queue = sorted(self.ready, key=lambda x: (x.tau, x.name))
-            if len(sorted_queue) != 0:  
-                best_process = sorted_queue[0]
-                if self.active == None:        # Make sure the queue isn't empty
-                    best_process.state = best_process.State.RUNNING
-                    self.post_ready = (best_process, self.current_time + best_process.context_switch_duration / 2)
-                    self.ready.remove(best_process)
-                elif self.active != "Switching":
-                    # Check for preemption (running tau is the estimated remaining time on the CPU)
-                    if best_process.tau < self.active.running_tau:
-                        # Need to remove process from CPU
-                        post_cpu = (self.active, self.current_time + self.active.context_switch_duration / 2, "ready")
-                        self.active = "Switching"
-
             # ----------------------------------- Post Ready -> CPU -----------------------------------
-
+            # print(self.current_time, "CPU\tPOST CPU\tREADY\tPOST READY\tBLOCKED\tCOMPLETED")
+            # print(self.active, self.post_cpu, self.ready, self.post_ready, self.blocked, self.completed)
+            
             if self.post_ready != None:
                 process, ready_time = self.post_ready
                 if ready_time == self.current_time:
                     # The context switch is complete and we can move the process in to the CPU
                     process.last_active_ts = self.current_time + process.burst_times[process.burst_index]
                     self.active = process
+                    print("Adding", process, "to the CPU with tau", process.running_tau)
+                    if self.current_time <= 999:
+                        self.process_burst(process)
+                    self.post_ready = None
+
+            # ----------------------------------- New -> Ready -----------------------------------
+
+            to_be_removed = []
+            for process in self.queue:
+                if process.creation_ts == self.current_time:
+                    self.ready.append(process)
+                    if self.current_time <= 999:
+                        self.process_arrived(process)
+                    to_be_removed.append(process)
+
+            for process in to_be_removed:
+                self.queue.remove(process)
+
+            # ----------------------------------- I/O -> Ready -----------------------------------
+
+            to_be_removed.clear()
+            for process in self.blocked:
+                if process.last_blocked_ts == self.current_time:
+                    # Done with I/O
+                    self.ready.append(process)
+                    if self.current_time <= 999:
+                        self.process_ends_io_burst(process)
+                    to_be_removed.append(process)
+
+            for process in to_be_removed:
+                self.blocked.remove(process)
 
             # ----------------------------------- CPU -> Post CPU -----------------------------------
 
             if self.active != None and self.active != "Switching":
                 if self.active.last_active_ts == self.current_time:
-                    # This process if finished with the CPU
-                    process.burst_index += 1
+                    # This process is finished with the CPU
+                    self.active.burst_index += 1
                     destination = ("completed" if self.active.is_completed() else "io")
                     self.active.tau = math.ceil(self.active.alpha * self.active.burst_times[self.active.burst_index - 1] + (1 - self.active.alpha) * self.active.tau)
+                    if self.current_time <= 999:
+                        self.recalculated_tau(self.active)
+                        if destination == "io":
+                            self.process_io_burst(self.active)
                     self.active.running_tau = self.active.tau
                     self.post_cpu = (self.active, self.current_time + self.active.context_switch_duration / 2, destination)
-                    self.active.running_tau = 0
+                    self.active.bursts_remaining -= 1
+                    if self.current_time <= 999:
+                        self.process_ends_burst(self.active)
+                    if destination == "completed":
+                        self.process_terminated(self.active)
+                    self.active = "Switching"
                 else:
                     self.active.running_tau -= 1
+                    # self.active.burst_times[self.active.burst_index] -= 1
 
             # ----------------------------------- Post CPU -> Ready-I/O-Done -----------------------------------
             
@@ -674,6 +688,8 @@ class SRTScheduler(Scheduler):
                 if ready_time == self.current_time:
                     if destination == "completed":
                         self.completed.append(process)
+                        if self.is_completed():
+                            break
                     elif destination == "io":
                         process.last_blocked_ts = self.current_time + process.io_burst_times[process.io_burst_index]
                         process.io_burst_index += 1
@@ -683,19 +699,31 @@ class SRTScheduler(Scheduler):
 
                     self.post_cpu = None
                     self.active = None  # Release the CPU
+
+            # ----------------------------------- Ready -> Post Ready -----------------------------------
             
-            # ----------------------------------- I/O -> Ready -----------------------------------
+            '''
+                A process should be sent to Post Ready if the CPU is available
+            '''
+            sorted_queue = sorted(self.ready, key=lambda x: (x.tau, x.name))
+            if len(sorted_queue) != 0:  
+                best_process = sorted_queue[0]
+                if self.active is None:        # Make sure the queue isn't empty
+                    if self.post_ready is None:
+                        best_process.state = best_process.State.RUNNING
+                        self.post_ready = (best_process, self.current_time + best_process.context_switch_duration / 2)
+                        self.ready.remove(best_process)
+                elif self.active != "Switching":
+                    # Check for preemption (running tau is the estimated remaining time on the CPU)
+                    print(best_process.name, best_process.tau, self.active.name, self.active.running_tau)
+                    if best_process.tau < self.active.running_tau:
+                        # Need to remove process from CPU
+                        if self.current_time <= 999:
+                            self.process_preempted(self.active, best_process)
+                        self.post_cpu = (self.active, self.current_time + self.active.context_switch_duration / 2, "ready")
+                        self.active = "Switching"
 
-            to_be_removed.clear()
-            for process in self.blocked:
-                if process.last_blocked_ts == self.current_time:
-                    # Done with I/O
-                    self.ready.append(process)
-                    to_be_removed.append(process)
-
-            for process in to_be_removed:
-                self.blocked.remove(process)
-
+            # time.sleep(0.1)
             self.current_time += 1
 
         self.end()
@@ -766,7 +794,7 @@ if __name__ == '__main__':
     rr = RRScheduler(RandomProcessFactory(sys.argv).generate())     # Round Robin
     
     # Execute (create) Schedules
-    # sjf.execute()
+    sjf.execute()
     srt.execute()
     fcfs.execute()
     rr.execute()
