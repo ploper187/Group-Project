@@ -438,8 +438,11 @@ class Scheduler:
             self.log_event(NewProcess(self, process))
 
     def __str__(self):
-        self.avg_cpu_wait_time = (sum([process.wait for process in self.completed])) / sum([len(process.burst_times) for process in self.completed])
-        
+        if sum([len(process.burst_times) for process in self.completed]) is not 0:
+            self.avg_cpu_wait_time = (sum([process.wait for process in self.completed])) / sum([len(process.burst_times) for process in self.completed])
+        else:
+            self.avg_cpu_wait_time = 0
+
         return '\n'.join(\
             ['Algorithm {0}'.format(self.name),   \
              '-- average CPU burst time: {0:0.3f} ms'.format(float(self.avg_cpu_burst_time)), \
@@ -519,7 +522,10 @@ class SJFScheduler(Scheduler):
         # SJF Algorithm
         self.begin()
         # self.avg_turnaround_time = sum([sum([burst + process.context_switch_duration for burst in process.burst_times]) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
-        self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        if sum([len(process.burst_times) for process in self.queue]) is not 0:
+            self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        else:
+            self.avg_cpu_burst_time = 0
 
         done = False
         self.post_cpu = []
@@ -530,7 +536,7 @@ class SJFScheduler(Scheduler):
 
             to_be_removed = []
             for process, completion in self.post_ready:
-                if completion == self.current_time:
+                if completion <= self.current_time:
                     self.num_context_switches += 1
                     if not self.current_time > LIMIT_TIME:
                         self.process_burst(process)
@@ -579,7 +585,7 @@ class SJFScheduler(Scheduler):
 
             to_be_removed.clear()
             for process, completion, destination in self.post_cpu:
-                if completion == self.current_time:
+                if completion <= self.current_time:
                     
                     self.active = None # Release the CPU
 
@@ -649,7 +655,10 @@ class SJFScheduler(Scheduler):
 
             self.current_time += 1
 
-        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        if sum([len(process.burst_times) for process in self.completed]) is not 0:
+            self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        else:
+            self.avg_turnaround_time = 0
         self.end()
 
 
@@ -661,7 +670,10 @@ class SRTScheduler(Scheduler):
         # TODO: Implement
         self.begin()
 
-        self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        if sum([len(process.burst_times) for process in self.queue]) is not 0:
+            self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        else:
+            self.avg_cpu_burst_time = 0
         
         while(not self.is_completed()):
 
@@ -669,7 +681,7 @@ class SRTScheduler(Scheduler):
             
             if self.post_ready != None:
                 process, ready_time = self.post_ready
-                if ready_time == self.current_time:
+                if ready_time <= self.current_time:
                     # The context switch is complete and we can move the process in to the CPU
                     process.last_active_ts = self.current_time + process.burst_times[process.burst_index]
                     self.active = process
@@ -724,7 +736,7 @@ class SRTScheduler(Scheduler):
             
             if self.post_cpu != None:
                 process, ready_time, destination = self.post_cpu
-                if ready_time == self.current_time:
+                if ready_time <= self.current_time:
 
                     process.turnaround += self.current_time - process.started_last_burst
                     if destination == "completed":
@@ -807,7 +819,10 @@ class SRTScheduler(Scheduler):
             # time.sleep(0.1)
             self.current_time += 1
 
-        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        if sum([len(process.burst_times) for process in self.completed]) is not 0:
+            self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        else:
+            self.avg_turnaround_time = 0
 
         self.end()
 
@@ -816,7 +831,10 @@ class SRTScheduler(Scheduler):
 class FCFSScheduler(Scheduler):
     name = "FCFS"
     def execute(self):
-        self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        if sum([len(process.burst_times) for process in self.queue]) is not 0:
+            self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        else:
+            self.avg_cpu_burst_time = 0
         self.sam = True
         self.begin()
         done = False
@@ -829,7 +847,7 @@ class FCFSScheduler(Scheduler):
             to_be_removed = []
             # handle post_cpu 
             for process, completion, destination in self.post_cpu:
-                if completion == self.current_time:
+                if completion <= self.current_time:
                     # FREE the CPU
                     self.active = None
                     process.turnaround += self.current_time - process.started_last_burst
@@ -865,7 +883,7 @@ class FCFSScheduler(Scheduler):
             # check for process that are ready to execute burst, start TIMESLICE
             to_be_removed.clear()
             for process, completion in self.post_ready:
-                if completion == self.current_time:
+                if completion <= self.current_time:
                     if not self.current_time > LIMIT_TIME:
                         self.process_burst(process)
                     self.num_context_switches += 1
@@ -960,7 +978,10 @@ class FCFSScheduler(Scheduler):
 
             self.current_time += 1
  
-        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        if sum([len(process.burst_times) for process in self.completed]) is not 0:
+            self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        else:
+            self.avg_turnaround_time = 0
 
         self.end()
 
@@ -969,7 +990,10 @@ class RRScheduler(Scheduler):
     name = "RR"
 
     def execute(self, args):
-        self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        if sum([len(process.burst_times) for process in self.queue]) is not 0:
+            self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
+        else:
+            self.avg_cpu_burst_time = 0
         self.sam = True
         self.begin()
         time_slice = int(args[7])
@@ -985,7 +1009,7 @@ class RRScheduler(Scheduler):
 
             # handle post_cpu 
             for process, completion, destination in self.post_cpu:
-                if completion == self.current_time:
+                if completion <= self.current_time:
                     # FREE the CPU
                     self.active = None
                     # if meant for IO
@@ -1025,7 +1049,7 @@ class RRScheduler(Scheduler):
             # check for process that are ready to execute burst, start TIMESLICE
             to_be_removed.clear()
             for process, completion in self.post_ready:
-                if completion == self.current_time:
+                if completion <= self.current_time:
                     if not self.current_time > LIMIT_TIME:
                         if process.status == "fresh":
                             self.process_burst(process)
@@ -1048,7 +1072,6 @@ class RRScheduler(Scheduler):
             for process in self.queue:
                 if process.creation_ts == self.current_time:
                     process.status = "fresh"
-                    process.num_times_waited += 1
                     process.started_last_burst = self.current_time
                     self.ready.append(process)
                     if not self.current_time > LIMIT_TIME:
@@ -1089,7 +1112,6 @@ class RRScheduler(Scheduler):
                 if len(self.ready) > 0:
                     # get the next process in line
                     process = self.ready.pop(0)
-                    process.state = process.State.RUNNING
                     self.active = process
                     # when the process will be done with everything
                     process.last_active_ts = \
@@ -1152,6 +1174,7 @@ class RRScheduler(Scheduler):
                             # CAM
                             self.process_preempted_sam(old_process, self.ready[0], time_left)
                         time_slice_counter = -1
+                        self.active = "Switching"
 
             self.current_time += 1
             # time slice counter is negative when there is no process running
@@ -1159,7 +1182,10 @@ class RRScheduler(Scheduler):
                 time_slice_counter += 1
 
 
-        self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        if sum([len(process.burst_times) for process in self.completed]) is not 0:
+            self.avg_turnaround_time = sum([process.turnaround for process in self.completed]) / sum([len(process.burst_times) for process in self.completed])
+        else:
+            self.avg_turnaround_time = 0
 
         self.end()
 
