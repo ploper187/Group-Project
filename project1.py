@@ -41,11 +41,8 @@ in this project.
 
 class Event:
     timestamp = -1
-
     def __str__(self):
         return "An Event"
-
-
 '''
 time <t>ms: <event-details> [Q <queue-contents>]
 
@@ -89,26 +86,23 @@ class ProcessEvent(Event):
     simulation = None
     def timestamp_str(self): return "time " + str(self.timestamp) + "ms"
 
-    def queue(self):
+    def queue(self, isSorted = True):
         q = self.simulation.ready
-
-        new_list = sorted(q, key=lambda x: (x.running_tau, x.name))
-
+        new_list = sorted(q, key=lambda x: (x.running_tau, x.name)) if isSorted else q
         s = "[Q "
-        if (len(q) > 0):
-                s += " ".join(p.name for p in new_list)
-        else:   s += "<empty>"
+        if (len(q) > 0): s += " ".join(p.name for p in new_list)
+        else:            s += "<empty>"
         s += "]"
         return s
 
-    def queue2(self, q):
-        new_list = q
-        s = "[Q "
-        if (len(q) > 0):
-                s += " ".join(p.name for p in new_list)
-        else:   s += "<empty>"
-        s += "]"
-        return s
+    # def queue2(self, q):
+    #     new_list = q
+    #     s = "[Q "
+    #     if (len(q) > 0):
+    #             s += " ".join(p.name for p in new_list)
+    #     else:   s += "<empty>"
+    #     s += "]"
+    #     return s
 
     def __init__(self, simulation, process):
         self.process = (process)
@@ -127,7 +121,7 @@ class ProcessArrival(ProcessEvent):
 
 class ProcessArrivalSam(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
-            "arrived; added to ready queue", self.queue2(self.simulation.ready)])
+            "arrived; added to ready queue", self.queue(self.simulation.ready)])
 
 class CPUBurstBegun(ProcessEvent):
     burst_time = -1
@@ -138,7 +132,7 @@ class CPUBurstBegun(ProcessEvent):
         self.burst_time = burst_time
 
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
-                "started using the CPU for", str(int(self.burst_time)) + "ms", "burst", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+                "started using the CPU for", str(int(self.burst_time)) + "ms", "burst", self.queue()])
 
 class CPUBurstContinued(ProcessEvent):
     burst_time = -1
@@ -149,18 +143,33 @@ class CPUBurstContinued(ProcessEvent):
         self.burst_time = burst_time
 
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
-                "started using the CPU with", str(int(self.burst_time)) + "ms", "remaining", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+                "started using the CPU with", str(int(self.burst_time)) + "ms", "remaining", self.queue()])
 
 class CPUBurstEnded(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process),
-                "completed a CPU burst;", str(self.process.bursts_remaining), "bursts to go", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+                "completed a CPU burst;", str(self.process.bursts_remaining), "bursts to go", self.queue()])
 
 class ProcessTauRecalculated(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", "Recalculated tau =", str(
-        self.process.tau) + "ms", "for process", self.process.name, (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+        self.process.tau) + "ms", "for process", self.process.name, self.queue()])
+
+
+
+class Preemption(ProcessEvent):
+    new_process = None
+
+    def __init__(self, simulation, old_process, new_process):
+        self.simulation = (simulation)
+        self.process = (old_process)
+        self.new_process = (new_process)
+
+    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),
+                              "(tau", str(self.new_process.tau) +
+                                "ms) completed I/O and will preempt",
+                              self.process.name, self.queue()])
 
 # CAM
-class PreemptionSam(ProcessEvent):
+class RRPreemption(Preemption):
     new_process = None
     time_left = None
 
@@ -174,25 +183,12 @@ class PreemptionSam(ProcessEvent):
         if (self.process.name == self.new_process.name):
             return " ".join([self.timestamp_str() + \
                     ": Time slice expired; no preemption because ready queue is empty", 
-                                  self.queue2(self.simulation.ready)])
+                                  self.queue()])
         else:
             return "".join([self.timestamp_str() + ": Time slice expired; process ", 
                                   str(self.process.name),
                                     " preempted with ", str(self.time_left), "ms to go "
-                                  ,self.queue2(self.simulation.ready)])
-
-class Preemption(ProcessEvent):
-    new_process = None
-
-    def __init__(self, simulation, old_process, new_process):
-        self.simulation = (simulation)
-        self.process = (old_process)
-        self.new_process = (new_process)
-
-    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),
-                              "(tau", str(self.new_process.tau) +
-                                "ms) completed I/O and will preempt",
-                              self.process.name, (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+                                  ,self.queue()])
 
 class ImmediatePreemption(ProcessEvent):
     new_process = None
@@ -205,7 +201,7 @@ class ImmediatePreemption(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.new_process),
                               "(tau", str(self.new_process.tau) +
                                 "ms) will preempt",
-                              self.process.name, (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+                              self.process.name, self.queue()])
 
 class Q_IOBurstStarts(ProcessEvent):
     io_burst_time = -1
@@ -216,19 +212,19 @@ class Q_IOBurstStarts(ProcessEvent):
         self.io_burst_time = io_burst_time
 
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "switching out of CPU; will block on I/O until time", str(
-        self.simulation.current_time + self.io_burst_time + int(self.process.context_switch_duration / 2)) + "ms", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+        self.simulation.current_time + self.io_burst_time + int(self.process.context_switch_duration / 2)) + "ms", self.queue()])
 
 
 class IOBurstEnds(ProcessEvent):
     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "(tau", str(
-        self.process.tau) + "ms)", "completed I/O; added to ready queue", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+        self.process.tau) + "ms)", "completed I/O; added to ready queue", self.queue()])
 
-class IOBurstEndsSam(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "completed I/O; added to ready queue", self.queue2(self.simulation.ready)])
+# class IOBurstEndsSam(ProcessEvent):
+#     def __str__(self): return " ".join([self.timestamp_str() + ":", str(self.process), "completed I/O; added to ready queue", self.queue2(self.simulation.ready)])
 
 class ProcessCompleted(ProcessEvent):
     def __str__(self): return " ".join(
-        [self.timestamp_str() + ":", str(self.process), "terminated", (self.queue() if not self.simulation.sam else self.queue2(self.simulation.ready))])
+        [self.timestamp_str() + ":", str(self.process), "terminated", self.queue()])
 
 
 class Process:
@@ -261,8 +257,8 @@ class Process:
     turnaround = 0
     started_last_burst = 0
     
-    def __init__(self, name, timestamp,
-                 num_bursts, cpu_burst_times, io_burst_times, alpha, context_switch_duration, tau=0):
+    def __init__(self, name, timestamp, num_bursts, cpu_burst_times, 
+                 io_burst_times, alpha, context_switch_duration, tau=0):
         self.name = name
         self.tau = math.ceil(tau)
         self.running_tau = self.tau
@@ -408,14 +404,14 @@ class Scheduler:
     # Number of processes that the schedule started with
     processes = 0
 
-    sam = False
-
     # Stats
     avg_cpu_burst_time = 0
     avg_cpu_wait_time = 0
     avg_turnaround_time = 0
     num_context_switches = 0
     num_preemptions = 0
+    # Printing parameters
+    isSortedQueue = False
 
     def execute(self): pass
 
@@ -434,6 +430,7 @@ class Scheduler:
         self.completed = []
         self.blocked = []
         self.active = None
+        self.isSortedQueue = False
         for process in self.queue:
             self.log_event(NewProcess(self, process))
 
@@ -498,23 +495,19 @@ class Scheduler:
         self.log_event(Preemption(self, process, new_process))
     def process_immediate_preempted(self, process, new_process):
         self.log_event(ImmediatePreemption(self, process, new_process))
-    def process_preempted_sam(self, process, new_process, time_left):
-        self.log_event(PreemptionSam(self, process, new_process, time_left))
+
     def process_terminated(self, process):
         # TODO: Configure process termination
         process.completion_ts = self.current_time
-
         self.log_event(ProcessCompleted(self, process))
-    def process_arrived_sam(self, process):
-        # TODO: Configure process arrival
-        self.log_event(ProcessArrivalSam(self, process))
-    def process_ends_io_burst_sam(self, process):
-        # TODO: Configure process IO bursts end
-        self.log_event(IOBurstEndsSam(self, process))
-    # CAM
-    def process_preempted_sam(self, process, new_process, time_left):
-        self.log_event(PreemptionSam(self, process, new_process, time_left))
-
+    # def process_arrived_sam(self, process):
+    #     # TODO: Configure process arrival
+    #     self.log_event(ProcessArrivalSam(self, process))
+    # def process_ends_io_burst_sam(self, process):
+    #     # TODO: Configure process IO bursts end
+    #     self.log_event(IOBurstEndsSam(self, process))
+    # def process_preempted_sam(self, process, new_process, time_left):
+    #     self.log_event(PreemptionSam(self, process, new_process, time_left))
 ''' Shorted Job First Process Scheduler '''
 class SJFScheduler(Scheduler):
     name = "SJF"
@@ -835,7 +828,7 @@ class FCFSScheduler(Scheduler):
             self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
         else:
             self.avg_cpu_burst_time = 0
-        self.sam = True
+        self.isSortedQueue = True
         self.begin()
         done = False
         self.post_cpu = []
@@ -905,7 +898,8 @@ class FCFSScheduler(Scheduler):
                     self.ready.append(process)
                     process.started_last_burst = self.current_time
                     if not self.current_time > LIMIT_TIME:
-                        self.process_arrived_sam(process)
+                        self.process_arrived(process)
+                        # self.process_arrived_sam(process)
                     to_be_removed.append(process)
             
             # remove any process from the queue that arrived
@@ -927,7 +921,8 @@ class FCFSScheduler(Scheduler):
                         blocked_process.state = blocked_process.State.COMPLETED
                         self.completed.append(blocked_process)
                     if not self.current_time > LIMIT_TIME:
-                        self.process_ends_io_burst_sam(blocked_process)
+                        self.process_ends_io_burst(blocked_process)
+                        # self.process_ends_io_burst_sam(blocked_process)
                     to_be_removed.append(blocked_process)
             
             #remove any process from the blocked list that arrived
@@ -989,12 +984,15 @@ class FCFSScheduler(Scheduler):
 class RRScheduler(Scheduler):
     name = "RR"
 
+    def process_preempted(self, process, new_process, time_left):
+        self.log_event(RRPreemption(self, process, new_process, time_left))
+
     def execute(self, args):
         if sum([len(process.burst_times) for process in self.queue]) is not 0:
             self.avg_cpu_burst_time = sum([sum(process.burst_times) for process in self.queue]) / sum([len(process.burst_times) for process in self.queue])
         else:
             self.avg_cpu_burst_time = 0
-        self.sam = True
+        self.isSortedQueue = True
         self.begin()
         time_slice = int(args[7])
         push_back_ready = (0 if len(args) == 9 and args[8] == 'BEGINNING' else 1)
@@ -1075,7 +1073,8 @@ class RRScheduler(Scheduler):
                     process.started_last_burst = self.current_time
                     self.ready.append(process)
                     if not self.current_time > LIMIT_TIME:
-                        self.process_arrived_sam(process)
+                        self.process_arrived(process)
+                        # self.process_arrived_sam(process)
                     to_be_removed.append(process)
             
             # remove any process from the queue that arrived
@@ -1097,7 +1096,8 @@ class RRScheduler(Scheduler):
                         blocked_process.state = blocked_process.State.COMPLETED
                         self.completed.append(blocked_process)
                     if not self.current_time > LIMIT_TIME:
-                        self.process_ends_io_burst_sam(blocked_process)
+                        self.process_ends_io_burst(blocked_process)
+                        # self.process_ends_io_burst_sam(blocked_process)
                     to_be_removed.append(blocked_process)
             
             #remove any process from the blocked list that arrived
@@ -1153,8 +1153,9 @@ class RRScheduler(Scheduler):
                     if (len(self.ready) == 0):
                         time_slice_counter = 0
                         if not self.current_time > LIMIT_TIME:
+                            self.process_preempted(self.active, self.active, 0)
                             # CAM
-                            self.process_preempted_sam(self.active, self.active, 0)
+                            # self.process_preempted_sam(self.active, self.active, 0)
                     # if we can PREEMPT 
                     else:
                         self.num_preemptions += 1
@@ -1172,7 +1173,8 @@ class RRScheduler(Scheduler):
                         if not self.current_time > LIMIT_TIME:
                             time_left = int(old_process.last_active_ts - self.current_time)
                             # CAM
-                            self.process_preempted_sam(old_process, self.ready[0], time_left)
+                            # self.process_preempted_sam(old_process, self.ready[0], time_left)
+                            self.process_preempted(old_process, self.ready[0], time_left)
                         time_slice_counter = -1
                         self.active = "Switching"
 
