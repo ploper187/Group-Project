@@ -81,27 +81,21 @@ class SimulationEvent(Event):
 
 class StartSimulation(SimulationEvent): action = "started"
 class EndSimulation(SimulationEvent):   action = "ended"
-
 class ProcessEvent(Event):
     process = None
     simulation = None
-    
     def __init__(self, simulation, process):
-        self.process = (process)
-        self.simulation = (simulation)
-
+        self.process = process
+        self.simulation = simulation
 class ProcessPlaced(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp_str(), "Placed process", self.process.name + "\n" + str(self.simulation)])
-
-
+    def __str__(self): return " ".join([self.timestamp_str(), "Placed process", \
+                                        self.process.name + "\n" + str(self.simulation)])
 class ProcessArrival(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp_str(), "Process", self.process.name, "arrived", "(requires", self.process.num_frames, "frames)"])
-
+    def __str__(self): return " ".join([self.timestamp_str(), "Process", self.process.name, "arrived", \
+                                        "(requires", self.process.num_frames, "frames)"])
 class ProcessTermination(ProcessEvent):
     def __str__(self): return " ".join(
         [self.timestamp_str(), "Process", self.process.name, "removed:\n" + str(self.simulation)])
-
-
 class Process:
     Burst = collections.namedtuple('Burst', 'start_time duration')
     name = None
@@ -121,15 +115,11 @@ class Process:
         return "Process {} -- ({}){} -- ({}){}".format(\
                 self.name, self.num_frames, [str(f) for f in self.frames], \
                 len(self.bursts), [(s.start_time, s.duration) for s in self.bursts])
-
     def add_frame(self, frame):   self.frames.append(frame)
     def set_frames(self, frames): self.frames = frames
     def clear_frames(self):       self.frames = []
-
 class ProcessFactory: pass
 class InputFileProcessFactory(ProcessFactory):
-    # Uncomment the next line if using Python 2.x...
-    # from __future__ import division
     @staticmethod
     def generate(input_filename): 
         processes = []
@@ -147,7 +137,6 @@ class InputFileProcessFactory(ProcessFactory):
                 processes.append(Process(name, num_frames, bursts))
                 # print("{} - {} w/ {}, {}".format( input_filename, name, frames_reqd, time_slots))
         return processes
-
 class Frame:
     process = None
     address = None
@@ -159,7 +148,7 @@ class Frame:
     def process_name(self):
         return self.process.name if self.process is not None else "."
     def __str__(self):
-        return "Frame -- {} -- {} -- {}".format(str(self.process), self.address, self.simulator.name)
+        return "Frame -- {} -- {} -- {}".format(str(self.process), self.address, type(self.simulator).__name__)
     def is_free(self): return self.process == None
     def free(self):
         if (self.is_free()): 
@@ -206,15 +195,15 @@ class MemorySimulator:
     def execute(self): pass
     def allocate(self, process): pass
     def free_block(self, range): pass
-    
 
     def __str__(self):
         s = "="*self.num_frames_per_line
         for i in range(len(self.frames)):
-            s += str(self.frames[i])
             if (i%self.num_frames_per_line == 0):
                 s += "\n"
-        s = "="*self.num_frames_per_line
+            s += self.frames[i].process_name()
+            
+        s += "\n" + "="*self.num_frames_per_line
         return s
 
 
@@ -229,6 +218,7 @@ class MemorySimulator:
         self.events = []
         self.current_time = 0
         self.completed = []
+        self.frames = [Frame(self, i) for i in range(num_frames)]
 
     def is_completed(self): 
         return len(self.completed) == self.num_processes
@@ -264,45 +254,43 @@ class ContiguousMemorySimulator(MemorySimulator):
     memory_type = "Contiguous"
     def allocate(self, process): pass
     def defragment(self): pass
-
-
 class NonContiguousMemorySimulator(MemorySimulator): 
     memory_type = "Noncontiguous"
     def allocate(self, process): pass
-
-class FFMemorySimulator(ContiguousMemorySimulator): pass
-class NFMemorySimulator(ContiguousMemorySimulator): pass
-class BFMemorySimulator(ContiguousMemorySimulator): pass 
+class FFMemorySimulator(ContiguousMemorySimulator): 
+    memory_algorithm = "First-Fit"
+class NFMemorySimulator(ContiguousMemorySimulator): 
+    memory_algorithm = "Next-Fit"
+class BFMemorySimulator(ContiguousMemorySimulator):
+    memory_algorithm = "Best-Fit"
 
 '''#############################################################################
-#                                     MAIN                                     #
-# '''
+##                                    MAIN                                    ##
+#############################################################################'''
 if __name__ == '__main__':
     is_debug = len(sys.argv) > 0 and sys.argv[-1] == "debug"
     argv = sys.argv
     if (len(sys.argv) < 5):
-        print("Not enough arguments. {}/5 provided!".format(len(sys.argv)))
-        sys.exit() 
+        raise Exception('Not enough arguments. 5 needed!')
     num_frames_per_line = int(argv[1])
     num_frames = int(argv[2])
     input_filename = argv[3]
-    t_memmove = argv[4]
+    t_memmove = int(argv[4])
+    # Generate processes
     processes = InputFileProcessFactory.generate(input_filename)  
-    for p in processes:
-        print(p)   
-    
+    # Create simulations
 
-
-
-
-    # Generate simulations
-    
-    # Queue processes
-    
-    # Create and execute simulations
+    # Execute simulations
 
     # Output simulation logs
-
+    
+    # for p in processes:
+    #     print(p)
+    # sim = MemorySimulator(processes, num_frames, num_frames_per_line)
+    # print(sim)
+    
+    # Generate simulations
+    
 
 
     # Done
