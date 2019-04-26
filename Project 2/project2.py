@@ -2,17 +2,6 @@ __author__ = "Cameron Scott, Adam Kuniholm, and Sam Fite"
 __right__ = "right 2019, Cameron Scott, Adam Kuniholm, and Sam Fite"
 __credits__ = ["Cameron Scott", "Adam Kuniholm", "Sam Fite"]
 __license__ = "MIT"
-
-LIMIT_TIME = 999
-
-from statistics import mean
-import sys
-import random
-import math
-from copy import copy
-from enum import Enum
-import time
-import collections
 '''
 CS 4210 Operating Systems
 Group Project 1 - CPU Scheduling Simulation
@@ -31,21 +20,29 @@ in this project.
 
 '''
 
-
 '''#############################################################################
 #                                   IMPORTS                                    #
 # '''
+import collections
+import time
+from enum import Enum
+from copy import copy
+import math
+import random
+import sys
+from statistics import mean
+LIMIT_TIME = 999
+
 '''#############################################################################
 #                              CLASS DECLARATIONS                              #
 # '''
 
-
 class Event:
     timestamp = -1
     def timestamp_str(self): return "time " + str(self.timestamp) + "ms:"
-
     def __str__(self):
         return "An Event"
+
 '''
 time <t>ms: <event-details> [Q <queue-contents>]
 
@@ -61,169 +58,122 @@ time <t>ms: <event-details> [Q <queue-contents>]
 • End of simulation
 '''
 
-
 class SimulationEvent(Event):
     simulation = None
     action = "<action not set>"
-
     def __init__(self, simulation): self.simulation = (simulation)
 
     def __str__(self):
         # time 0ms: Simulator started (Contiguous -- First-Fit)
-        s = " ".join([self.timestamp_str() \
-                    , "Simulator" \
-                    , self.action \
-                    , "(" + self.simulation.memoryType \
-                    , "--" \
-                    , self.simulation.memoryAlgorithm + ")"])
+        s = " ".join([self.timestamp_str(), "Simulator", self.action, "(" +
+                      self.simulation.memoryType, "--", self.simulation.memoryAlgorithm + ")"])
         return s
-
 
 class StartSimulation(SimulationEvent): action = "started"
 class EndSimulation(SimulationEvent):   action = "ended"
-class ProcessEvent(Event):
-    process = None
+
+class BurstEvent(Event):
+    burst = None
     simulation = None
-    def __init__(self, simulation, process):
-        self.process = process
+    def __init__(self, simulation, burst):
+        self.burst = burst
         self.simulation = simulation
-class ProcessPlaced(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp_str(), "Placed process", \
-                                        self.process.name + "\n" + str(self.simulation)])
-class ProcessArrival(ProcessEvent):
-    def __str__(self): return " ".join([self.timestamp_str(), "Process", self.process.name, "arrived", \
-                                        "(requires", self.process.num_frames, "frames)"])
-class ProcessTermination(ProcessEvent):
+
+class BurstArrival(BurstEvent):
+    def __str__(self): return " ".join([self.timestamp_str(), "Process", self.burst.process_name, "arrived",
+                                        "(requires", self.burst.num_frames, "frames)"])
+
+class BurstTermination(BurstEvent):
     def __str__(self): return " ".join(
-        [self.timestamp_str(), "Process", self.process.name, "removed:\n" + str(self.simulation)])
-class Process:
-    Burst = collections.namedtuple('Burst', 'start_time duration')
-    name = None
-    events = None
+        [self.timestamp_str(), "Process", self.burst.process_name, "removed:\n" + str(self.simulation)])
+
+class Burst:
+    start_time = None
+    duration = None
     num_frames = None
-    frames = None
-    bursts = None # [(arrival_time, run_time)]
-    num_bursts_left = None
-    def __init__(self, name, frames_needed, bursts):
-        self.name = name
-        self.events = []
-        self.num_frames = frames_needed
-        self.bursts = bursts
-        self.num_bursts_left = len(bursts)
-        self.frames = []
-    def __str__(self): 
-        return "Process {} -- ({}){} -- ({}){}".format(\
-                self.name, self.num_frames, [str(f) for f in self.frames], \
-                len(self.bursts), [(s.start_time, s.duration) for s in self.bursts])
-    def add_frame(self, frame):   self.frames.append(frame)
-    def set_frames(self, frames): self.frames = frames
-    def clear_frames(self):       self.frames = []
-class ProcessFactory: pass
-class InputFileProcessFactory(ProcessFactory):
+    process_name = None
+    allocation_start_idx = None
+    allocation_end_idx = None
+    def __init__(self, start_time, duration, num_frames, process_name):
+        self.start_time = start_time
+        self.duration = duration
+        self.num_frames = num_frames
+        self.allocation_start_idx = None
+        self.allocation_end_idx = None
+
+class BurstFactory: pass
+class InputFileBurstFactory(BurstFactory):
     @staticmethod
-    def generate(input_filename): 
-        processes = []
+    def generate(input_filename):
+        bursts = []
         with open(input_filename) as file:
             for line in file:
                 if (line[0] == "#"):
                     continue
-                l = line.split()
-                name = l[0]
-                num_frames = int(l[1])
-                bursts = []
-                for times in l[2:]:
+                split_line = line.split()
+                name = split_line[0]
+                num_frames = int(split_line[1])
+                for times in split_line[2:]:
                     tl = times.split("/")
-                    bursts.append(Process.Burst(start_time=int(tl[0]),duration=int(tl[1])))
-                processes.append(Process(name, num_frames, bursts))
-                # print("{} - {} w/ {}, {}".format( input_filename, name, frames_reqd, time_slots))
-        return processes
-class Frame:
-    process = None
-    address = None
-    simulator = None
-    def __init__(self, simulator, address, process = None):
-        self.process = process
-        self.simulator = simulator
-        self.address = address
-    def process_name(self):
-        return self.process.name if self.process is not None else "."
-    def __str__(self):
-        return "Frame -- {} -- {} -- {}".format(str(self.process), self.address, type(self.simulator).__name__)
-    def is_free(self): return self.process == None
-    def free(self):
-        if (self.is_free()): 
-            return False
-        self.process = None
-        self.address = None
-        return True
-    def allocate(self, process, at_address, force = False):
-        if ((not force) and self.is_free()):
-            return False
-        self.process = process
-        self.location = int(at_address)
-        return True
-    def move(self, address):
-        self.address = address
-    def reallocate(self, new_process, at_new_address):
-        if (not self.is_free()):
-            self.free()
-        return self.allocate(new_process, at_new_address)
-
+                    start_time = int(tl[0])
+                    duration = int(tl[1])
+                    b = Burst(start_time, duration, num_frames, name)
+                    bursts.append(b)
+        return bursts
 
 class MemorySimulator:
     memory_type = "No memory type"
     memory_algorithm = "No memory algorithm"
-    num_frames_per_line = None #0
-    num_frames_tot = None #0
-    num_frames_allocated = None #0
+    num_frames_per_line = None  # 0
+    num_frames_tot = None  # 0
+    num_frames_allocated = None  # 0
     frames = []
     # Ready processes
-    ready = None #[]
+    ready = None  # []
     # Completed processes
-    completed = None #[]
+    completed = None  # []
     # Events
-    events = None #[]
+    events = None  # []
     # Logs
-    log = None #[]
+    log = None  # []
     # Current time (in ms)
-    current_time = None #0
+    current_time = None  # 0
     # Queue
-    queue = None #[]
+    queue = None  # []
     # Number of processes that the schedule started with
-    num_processes = None #0
+    num_bursts = None  # 0
 
     def execute(self): pass
-    def allocate(self, process): pass
-    def free_block(self, range): pass
+    def allocate(self, burst): pass
+    def free(self, burst): pass
 
     def __str__(self):
         s = "="*self.num_frames_per_line
         for i in range(len(self.frames)):
-            if (i%self.num_frames_per_line == 0):
+            if (i % self.num_frames_per_line == 0):
                 s += "\n"
-            s += self.frames[i].process_name()
-            
+            s += self.frames[i]
+
         s += "\n" + "="*self.num_frames_per_line
         return s
 
-
-    def __init__(self, processes, num_frames, num_frames_per_line = 32):
+    def __init__(self, bursts, num_frames, num_frames_per_line=32):
         self.num_frames_per_line = num_frames_per_line
         self.num_frames_tot = num_frames
         self.num_frames_allocated = 0
-        self.queue = processes
-        self.num_processes = len(self.queue)
-        self.ready = []
+        self.queue = bursts
+        self.num_bursts = len(self.queue)
         self.log = []
         self.events = []
         self.current_time = 0
         self.completed = []
-        self.frames = [Frame(self, i) for i in range(num_frames)]
+        self.frames = ['.' for i in range(num_frames)]
 
-    def is_completed(self): 
-        return len(self.completed) == self.num_processes
+    def is_completed(self):
+        return len(self.completed) == self.num_bursts
+
     def logs(self):
-        ret = sorted(self.log, key = lambda x: (x[1], x[2]))
+        ret = sorted(self.log, key=lambda x: (x[1], x[2]))
         string = ""
         for event in ret:
             string += event[0] + ("\n" if event is not ret[-1] else "")
@@ -232,37 +182,129 @@ class MemorySimulator:
         Log an event, such as a preemption, process completion, or context switch
         e.g. self.log_event(ProcessCompleted(p1))
     '''
+
     def log_event(self, event):
         timestamp = self.current_time
         event.timestamp = self.current_time
-        if (isinstance(event, ProcessEvent)):
-            event.process.events.append(event)
         self.events.append(event)
         t = type(event).__name__
         self.log.append((str(event), timestamp, t))
+
     def begin(self): self.log_event(StartSimulation(self))
     def end(self):   self.log_event(EndSimulation(self))
-    def process_arrived(self, process):
+
+    def burst_started(self, burst):
         # TODO: Configure process arrival
-        self.log_event(ProcessArrival(self, process))
-    def process_terminated(self, process):
+        self.log_event(BurstArrival(self, burst))
+
+    def burst_ended(self, burst):
         # TODO: Configure process termination
-        process.completion_ts = self.current_time
-        self.log_event(ProcessTermination(self, process))
+        burst.completion_ts = self.current_time
+        self.log_event(BurstTermination(self, burst))
 
 class ContiguousMemorySimulator(MemorySimulator): 
     memory_type = "Contiguous"
-    def allocate(self, process): pass
-    def defragment(self): pass
-class NonContiguousMemorySimulator(MemorySimulator): 
+
+class NonContiguousMemorySimulator(MemorySimulator):
     memory_type = "Noncontiguous"
-    def allocate(self, process): pass
-class FFMemorySimulator(ContiguousMemorySimulator): 
+    memory_algorithm = "Best-Fit"
+
+    def execute(self):
+        """
+        TODO:
+        Run through the bursts here, calling allocate and free
+        when appropriate
+        """
+
+    def allocate(self, burst):
+        """
+        TODO:
+        Allocate memory for a burst here, according to the 
+        algorithm, and defragment whenever necessary
+        """
+
+    def free(self, burst):
+        """
+        TODO:
+        Deallocate memory of a burst here, according to the
+        algorithm, and defragment whenever necessary
+        """
+
+
+class FFMemorySimulator(ContiguousMemorySimulator):
     memory_algorithm = "First-Fit"
-class NFMemorySimulator(ContiguousMemorySimulator): 
+
+    def execute(self):
+        """
+        TODO:
+        Run through the bursts here, calling allocate and free
+        when appropriate
+        """
+
+    def allocate(self, burst):
+        """
+        TODO:
+        Allocate memory for a burst here, according to the 
+        algorithm, and defragment whenever necessary
+        """
+
+    def free(self, burst):
+        """
+        TODO:
+        Deallocate memory of a burst here, according to the
+        algorithm, and defragment whenever necessary
+        """
+
+
+class NFMemorySimulator(ContiguousMemorySimulator):
     memory_algorithm = "Next-Fit"
+
+    def execute(self):
+        """
+        TODO:
+        Run through the bursts here, calling allocate and free
+        when appropriate
+        """
+
+    def allocate(self, burst):
+        """
+        TODO:
+        Allocate memory for a burst here, according to the 
+        algorithm, and defragment whenever necessary
+        """
+
+    def free(self, burst):
+        """
+        TODO:
+        Deallocate memory of a burst here, according to the
+        algorithm, and defragment whenever necessary
+        """
+
+
 class BFMemorySimulator(ContiguousMemorySimulator):
     memory_algorithm = "Best-Fit"
+
+    def execute(self):
+        """
+        TODO:
+        Run through the bursts here, calling allocate and free
+        when appropriate
+        """
+
+    def allocate(self, burst):
+        """
+        TODO:
+        Allocate memory for a burst here, according to the 
+        algorithm, and defragment whenever necessary
+        """
+
+    def free(self, burst):
+        """
+        TODO:
+        Deallocate memory of a burst here, according to the
+        algorithm, and defragment whenever necessary
+        """
+
 
 '''#############################################################################
 ##                                    MAIN                                    ##
@@ -277,20 +319,20 @@ if __name__ == '__main__':
     input_filename = argv[3]
     t_memmove = int(argv[4])
     # Generate processes
-    processes = InputFileProcessFactory.generate(input_filename)  
+    bursts = InputFileBurstFactory.generate(input_filename)
     # Create simulations
-
+    ff = FFMemorySimulator(bursts, num_frames, num_frames_per_line)
+    nf = NFMemorySimulator(bursts, num_frames, num_frames_per_line)
+    bf = BFMemorySimulator(bursts, num_frames, num_frames_per_line)
+    nc = NonContiguousMemorySimulator(bursts, num_frames, num_frames_per_line)
     # Execute simulations
-
+    ff.execute()
+    nf.execute()
+    bf.execute()
+    nc.execute()
     # Output simulation logs
-    
-    # for p in processes:
-    #     print(p)
-    # sim = MemorySimulator(processes, num_frames, num_frames_per_line)
-    # print(sim)
-    
-    # Generate simulations
-    
-
-
+    print(ff.logs())
+    print(nf.logs())
+    print(bf.logs())
+    print(nc.logs())
     # Done
